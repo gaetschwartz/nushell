@@ -220,3 +220,44 @@ export def zip-into-record [ # -> table<any>
     | append ($other | into record)
     | headers
 }
+
+# Returns ther difference between two records
+#
+# # Example
+# ```nu
+# use std ["assert equal" "iter iter record-diff"]
+#
+# let res = {foo: 1, bar: 2, uwu: true} | iter record-diff {foo: 2, life: 2, uwu: true}
+#
+# assert equal $res {changed: [{column: "foo", old: 1, new: 2}], added: [{column: "life", new: 2}], removed: [{column: "bar", old: 2}], unchanged: [{column: "uwu"}]}
+# ```
+export def record-diff [
+    other: record                    # the record to diff with
+] {
+    let val = $in
+    [$val, $other] | columns | each { |c|
+        let has0 = $c in $val
+        let has1 = $c in $other
+        if $has0 and $has1 {
+            let v0 = $val | get $c
+            let v1 = $other | get $c
+            if $v0 != $v1 {
+                {changed: {column: $c, old: $v0, new: $v1}}
+            } else {
+                {unchanged: {column: $c}}
+            }
+        } else if $has0 and (not $has1) {
+            {removed: {column: $c, old: ($val | get $c)}}
+        } else {
+            {added: {column: $c, new: ($other | get $c)}}
+        }
+    } | reduce -f {changed:[],removed:[],added:[],unchanged:[]} { |it, acc|
+        match $it {
+            {changed: $c} => { $acc | update changed ($acc.changed | append $c) },
+            {removed: $c} => { $acc | update removed ($acc.removed | append $c) },
+            {added: $c} => { $acc | update added ($acc.added | append $c) },
+            {unchanged: $c} => { $acc | update unchanged ($acc.unchanged | append $c) },
+            null => $acc,
+        }
+    }
+}
