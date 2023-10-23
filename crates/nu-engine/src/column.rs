@@ -3,17 +3,16 @@ use nu_protocol::Value;
 use std::collections::HashSet;
 
 pub fn get_columns(input: &[Value]) -> Vec<String> {
-    let mut set: IndexSet<&String> = IndexSet::new();
+    let mut set: IndexSet<&String, ahash::RandomState> = IndexSet::default();
 
     for item in input {
         let Value::Record { val, .. } = item else {
             return vec![];
         };
-
         set.extend(&val.cols);
     }
 
-    set.into_iter().map(|x| x.to_string()).collect()
+    set.iter().map(|x| x.to_string()).collect()
 }
 
 // If a column doesn't exist in the input, return it.

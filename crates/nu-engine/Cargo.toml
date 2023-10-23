@@ -16,6 +16,7 @@ nu-path = { path = "../nu-path", version = "0.85.1" }
 nu-glob = { path = "../nu-glob", version = "0.85.1" }
 nu-utils = { path = "../nu-utils", version = "0.85.1" }
 indexmap = "2.0.2"
+ahash = "0.8.4"
 
 [features]
 plugin = []
