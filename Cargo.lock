@@ -2996,6 +2996,7 @@ name = "nu-plugin"
 version = "0.88.2"
 dependencies = [
  "bincode",
+ "libc",
  "nu-engine",
  "nu-protocol",
  "rmp-serde",
