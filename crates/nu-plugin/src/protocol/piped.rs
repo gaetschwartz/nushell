@@ -12,31 +12,37 @@ pub struct OsPipe {
     pub span: Span,
 
     #[serde(with = "windows_handle_serialization")]
-    #[cfg(target_env = "msvc")]
+    #[cfg(windows)]
     read_handle: Option<windows::Win32::Foundation::HANDLE>,
 
     #[serde(skip)]
-    #[cfg(target_env = "msvc")]
+    #[cfg(windows)]
     write_handle: Option<windows::Win32::Foundation::HANDLE>,
+
+    #[cfg(unix)]
+    name: String,
 }
 
 impl NamedPipeImpl for OsPipe {
     fn create(span: Span) -> Result<Self, PipeError> {
-        #[cfg(target_env = "libc")]
+        #[cfg(unix)]
         {
             use std::libc::mkfifo;
             use std::os::unix::ffi::OsStrExt;
+
+            let tempdir = std::env::temp_dir();
+            let name = tempdir.join(format!("nu-pipe-{}", uuid::Uuid::new_v4().to_string()));
 
             let c_name = std::ffi::CString::new(name.as_bytes()).unwrap();
             let c_mode = 0o644;
             let result = unsafe { mkfifo(c_name.as_ptr(), c_mode) };
             if result == 0 {
-                Ok(OsPipe { name, span })
+                Ok(OsPipe { span, name })
             } else {
                 Err(())
             }
         }
-        #[cfg(target_env = "msvc")]
+        #[cfg(windows)]
         {
             use windows::Win32::System::Pipes::CreatePipe;
 
@@ -54,12 +60,16 @@ impl NamedPipeImpl for OsPipe {
                 write_handle: Some(write_handle),
             })
         }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(PipeError::UnsupportedPlatform)
+        }
     }
 }
 
 impl std::io::Read for OsPipe {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        #[cfg(target_env = "libc")]
+        #[cfg(unix)]
         {
             use std::libc::{open, read, O_RDONLY};
             use std::os::unix::ffi::OsStrExt;
@@ -77,7 +87,7 @@ impl std::io::Read for OsPipe {
 
             Ok(result as usize)
         }
-        #[cfg(target_env = "msvc")]
+        #[cfg(windows)]
         {
             let mut bytes_read = 0;
 
@@ -100,12 +110,16 @@ impl std::io::Read for OsPipe {
 
             Ok(bytes_read as usize)
         }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(PipeError::UnsupportedPlatform)
+        }
     }
 }
 
 impl std::io::Write for OsPipe {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        #[cfg(target_env = "libc")]
+        #[cfg(unix)]
         {
             use std::libc::{open, write, O_WRONLY};
             use std::os::unix::ffi::OsStrExt;
@@ -123,7 +137,7 @@ impl std::io::Write for OsPipe {
 
             Ok(result as usize)
         }
-        #[cfg(target_env = "msvc")]
+        #[cfg(windows)]
         {
             let mut bytes_written = 0;
 
@@ -146,6 +160,10 @@ impl std::io::Write for OsPipe {
 
             Ok(bytes_written as usize)
         }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(PipeError::UnsupportedPlatform)
+        }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -156,7 +174,7 @@ impl std::io::Write for OsPipe {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct StreamCustomValue {
     pub span: Span,
-    pub named_pipe: OsPipe,
+    pub os_pipe: OsPipe,
 }
 
 impl CustomValue for StreamCustomValue {
@@ -170,7 +188,7 @@ impl CustomValue for StreamCustomValue {
 
     fn to_base_value(&self, span: Span) -> Result<Value, ShellError> {
         let val = Vec::new();
-        _ = self.named_pipe.clone().read_to_end(&mut val.clone())?;
+        _ = self.os_pipe.clone().read_to_end(&mut val.clone())?;
         Ok(Value::binary(val, span))
     }
 
@@ -191,7 +209,7 @@ impl CustomValue for StreamCustomValue {
 
 impl std::io::Read for StreamCustomValue {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.named_pipe.read(buf)
+        self.os_pipe.read(buf)
     }
 }
 
@@ -200,6 +218,7 @@ pub enum PipeError {
     InvalidPipeName(String),
     UnexpectedInvalidPipeHandle,
     FailedToCreatePipe(OSError),
+    UnsupportedPlatform,
 }
 
 impl From<PipeError> for ShellError {
@@ -216,24 +235,25 @@ impl From<PipeError> for ShellError {
             PipeError::FailedToCreatePipe(error) => {
                 ShellError::IOError(format!("Failed to create pipe: {}", error.0.to_string()))
             }
+            PipeError::UnsupportedPlatform => ShellError::IOError("Pipe".to_string()),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OSError(
-    #[cfg(target_env = "msvc")] windows::core::Error,
-    #[cfg(not(target_env = "msvc"))] std::io::Error,
+    #[cfg(windows)] windows::core::Error,
+    #[cfg(not(windows))] std::io::Error,
 );
 
-#[cfg(target_env = "msvc")]
+#[cfg(windows)]
 impl From<windows::core::Error> for OSError {
     fn from(error: windows::core::Error) -> Self {
         OSError(error)
     }
 }
 
-#[cfg(target_env = "msvc")]
+#[cfg(windows)]
 pub mod windows_handle_serialization {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
