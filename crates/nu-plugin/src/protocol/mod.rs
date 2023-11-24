@@ -1,9 +1,11 @@
 mod evaluated_call;
+mod piped;
 mod plugin_custom_value;
 mod plugin_data;
 
 pub use evaluated_call::EvaluatedCall;
 use nu_protocol::{PluginSignature, ShellError, Span, Value};
+pub use piped::{OsPipe, StreamCustomValue};
 pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,7 @@ pub struct CallInfo {
 pub enum CallInput {
     Value(Value),
     Data(PluginData),
+    Pipe(OsPipe),
 }
 
 // Information sent to the plugin
