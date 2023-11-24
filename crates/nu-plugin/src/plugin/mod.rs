@@ -4,7 +4,7 @@ use nu_engine::documentation::get_flags_section;
 use std::collections::HashMap;
 
 use crate::protocol::{CallInput, LabeledError, PluginCall, PluginData, PluginResponse};
-use crate::EncodingType;
+use crate::{EncodingType, StreamCustomValue};
 use std::env;
 use std::fmt::Write;
 use std::io::{BufReader, ErrorKind, Read, Write as WriteTrait};
@@ -330,6 +330,13 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                                     msg: err.to_string(),
                                 })
                         }
+                        CallInput::Pipe(pipe) => Ok(Value::custom_value(
+                            Box::new(StreamCustomValue {
+                                span: call_info.call.head,
+                                named_pipe: pipe,
+                            }),
+                            call_info.call.head,
+                        )),
                     };
 
                     let value = match input {
