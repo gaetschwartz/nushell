@@ -53,6 +53,12 @@ pub enum PipelineData {
     Empty,
 }
 
+impl PartialEq for PipelineData {
+    fn eq(&self, _other: &Self) -> bool {
+        return false;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PipelineMetadata {
     pub data_source: DataSource,

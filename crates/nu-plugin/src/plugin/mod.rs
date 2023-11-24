@@ -330,7 +330,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                                     msg: err.to_string(),
                                 })
                         }
-                        CallInput::Pipe(pipe) => Ok(Value::custom_value(
+                        CallInput::Pipe(pipe, _) => Ok(Value::custom_value(
                             Box::new(StreamCustomValue {
                                 span: call_info.call.head,
                                 os_pipe: pipe,
