@@ -3,43 +3,43 @@ use std::io::Read;
 use nu_protocol::{CustomValue, ShellError, Span, Value};
 use serde::{Deserialize, Serialize};
 
-trait NamedPipeImpl: Sized {
-    fn create(span: Span) -> Result<Self, PipeError>;
-}
-
+#[cfg(windows)]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct OsPipe {
     pub span: Span,
 
     #[serde(with = "windows_handle_serialization")]
-    #[cfg(windows)]
     read_handle: Option<windows::Win32::Foundation::HANDLE>,
 
     #[serde(skip)]
-    #[cfg(windows)]
     write_handle: Option<windows::Win32::Foundation::HANDLE>,
-
-    #[cfg(unix)]
-    name: String,
 }
 
-impl NamedPipeImpl for OsPipe {
-    fn create(span: Span) -> Result<Self, PipeError> {
+#[cfg(unix)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct OsPipe {
+    pub span: Span,
+
+    read_fd: libc::c_int,
+    write_fd: libc::c_int,
+}
+
+impl OsPipe {
+    pub fn create(span: Span) -> Result<Self, PipeError> {
         #[cfg(unix)]
         {
-            use std::libc::mkfifo;
-            use std::os::unix::ffi::OsStrExt;
+            use libc::pipe;
 
-            let tempdir = std::env::temp_dir();
-            let name = tempdir.join(format!("nu-pipe-{}", uuid::Uuid::new_v4().to_string()));
-
-            let c_name = std::ffi::CString::new(name.as_bytes()).unwrap();
-            let c_mode = 0o644;
-            let result = unsafe { mkfifo(c_name.as_ptr(), c_mode) };
+            let mut fds: [libc::c_int; 2] = [0; 2];
+            let result = unsafe { pipe(fds.as_mut_ptr()) };
             if result == 0 {
-                Ok(OsPipe { span, name })
+                Ok(OsPipe {
+                    span,
+                    read_fd: fds[0],
+                    write_fd: fds[1],
+                })
             } else {
-                Err(())
+                Err(PipeError::UnexpectedInvalidPipeHandle)
             }
         }
         #[cfg(windows)]
@@ -52,13 +52,47 @@ impl NamedPipeImpl for OsPipe {
             unsafe { CreatePipe(&mut read_handle, &mut write_handle, None, 0) }
                 .map_err(|e| PipeError::FailedToCreatePipe(OSError(e)))?;
 
-            println!("Created pipe.");
-
             Ok(OsPipe {
                 span,
                 read_handle: Some(read_handle),
                 write_handle: Some(write_handle),
             })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(PipeError::UnsupportedPlatform)
+        }
+    }
+
+    pub fn close(&mut self) -> Result<(), PipeError> {
+        #[cfg(unix)]
+        {
+            use libc::close;
+
+            let (read_res, write_res) = unsafe { (close(self.read_fd), close(self.write_fd)) };
+
+            if read_res < 0 || write_res < 0 {
+                return Err(PipeError::FailedToClose);
+            }
+
+            Ok(())
+        }
+        #[cfg(windows)]
+        {
+            use windows::Win32::System::Pipes::CloseHandle;
+
+            let read_res = self
+                .read_handle
+                .map(|handle| unsafe { CloseHandle(handle) });
+            let write_res = self
+                .write_handle
+                .map(|handle| unsafe { CloseHandle(handle) });
+
+            if read_res.is_err() || write_res.is_err() {
+                return Err(PipeError::FailedToClose);
+            }
+
+            Ok(())
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -71,16 +105,9 @@ impl std::io::Read for OsPipe {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         #[cfg(unix)]
         {
-            use std::libc::{open, read, O_RDONLY};
-            use std::os::unix::ffi::OsStrExt;
+            use libc::read;
 
-            let c_name = std::ffi::CString::new(self.name.as_bytes()).unwrap();
-            let fd = unsafe { open(c_name.as_ptr(), O_RDONLY, 0) };
-            if fd < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-
-            let result = unsafe { read(fd, buf.as_mut_ptr() as *mut _, buf.len()) };
+            let result = unsafe { read(self.read_fd, buf.as_mut_ptr() as *mut _, buf.len()) };
             if result < 0 {
                 return Err(std::io::Error::last_os_error());
             }
@@ -121,16 +148,12 @@ impl std::io::Write for OsPipe {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         #[cfg(unix)]
         {
-            use std::libc::{open, write, O_WRONLY};
-            use std::os::unix::ffi::OsStrExt;
+            use libc::write;
 
-            let c_name = std::ffi::CString::new(self.name.as_bytes()).unwrap();
-            let fd = unsafe { open(c_name.as_ptr(), O_WRONLY, 0) };
-            if fd < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
+            // https://stackoverflow.com/a/24099738
+            // fifo is blocking
 
-            let result = unsafe { write(fd, buf.as_ptr() as *const _, buf.len()) };
+            let result = unsafe { write(self.write_fd, buf.as_ptr() as *const _, buf.len()) };
             if result < 0 {
                 return Err(std::io::Error::last_os_error());
             }
@@ -213,12 +236,13 @@ impl std::io::Read for StreamCustomValue {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug)]
 pub enum PipeError {
     InvalidPipeName(String),
     UnexpectedInvalidPipeHandle,
     FailedToCreatePipe(OSError),
     UnsupportedPlatform,
+    FailedToClose,
 }
 
 impl From<PipeError> for ShellError {
@@ -235,12 +259,15 @@ impl From<PipeError> for ShellError {
             PipeError::FailedToCreatePipe(error) => {
                 ShellError::IOError(format!("Failed to create pipe: {}", error.0.to_string()))
             }
-            PipeError::UnsupportedPlatform => ShellError::IOError("Pipe".to_string()),
+            PipeError::UnsupportedPlatform => {
+                ShellError::IOError("Unsupported platform for pipes".to_string())
+            }
+            PipeError::FailedToClose => ShellError::IOError("Failed to close pipe".to_string()),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct OSError(
     #[cfg(windows)] windows::core::Error,
     #[cfg(not(windows))] std::io::Error,
@@ -333,6 +360,8 @@ mod tests {
 
         assert_eq!(read, 11);
         assert_eq!(buf, "hello world".as_bytes());
+
+        pipe.close().unwrap();
     }
 
     #[test]
@@ -345,6 +374,7 @@ mod tests {
 
         // serialize the pipe
         let serialized = serde_json::to_string(&pipe).unwrap();
+        // deserialize the pipe
         let mut deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
 
         let mut buf = [0u8; 11];
@@ -353,5 +383,60 @@ mod tests {
 
         assert_eq!(read, 11);
         assert_eq!(buf, "hello world".as_bytes());
+
+        deserialized.close().unwrap();
+        pipe.close().unwrap();
+    }
+
+    #[test]
+    fn test_pipe_in_another_thread() {
+        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        // write hello world to the pipe
+        let written = pipe.write("hello world".as_bytes()).unwrap();
+
+        assert_eq!(written, 11);
+
+        // serialize the pipe
+        let serialized = serde_json::to_string(&pipe).unwrap();
+        // spawn a new process
+        std::thread::spawn(move || {
+            // deserialize the pipe
+            let mut deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
+
+            let mut buf = [0u8; 11];
+
+            let read = deserialized.read(&mut buf).unwrap();
+
+            assert_eq!(read, 11);
+            assert_eq!(buf, "hello world".as_bytes());
+
+            deserialized.close().unwrap();
+        });
+    }
+
+    #[test]
+    fn test_pipe_in_another_process() {
+        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        // write hello world to the pipe
+        let written = pipe.write("hello world".as_bytes()).unwrap();
+
+        assert_eq!(written, 11);
+
+        // serialize the pipe
+        let serialized = serde_json::to_string(&pipe).unwrap();
+        // spawn a new process
+        let res = std::process::Command::new("cargo")
+            .arg("run")
+            .arg("--bin")
+            .arg("nu_plugin_pipe_echoer")
+            .arg(serialized)
+            .output()
+            .unwrap();
+
+        assert_eq!(res.status.success(), true);
+        assert_eq!(
+            String::from_utf8_lossy(res.stdout.as_slice()),
+            "hello world\n"
+        );
     }
 }
