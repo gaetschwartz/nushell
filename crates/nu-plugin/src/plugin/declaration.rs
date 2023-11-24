@@ -1,4 +1,4 @@
-use crate::EvaluatedCall;
+use crate::{EvaluatedCall, OsPipe};
 
 use super::{call_plugin, create_command, get_plugin_encoding};
 use crate::protocol::{
@@ -27,6 +27,42 @@ impl PluginDeclaration {
             filename,
             shell,
         }
+    }
+
+    fn make_call_input(&self, input: PipelineData, call: &Call) -> Result<CallInput, ShellError> {
+        if let PipelineData::ExternalStream { .. } = input {
+            return Ok(CallInput::Pipe(OsPipe::create(call.head)?, Some(input)));
+        }
+        let input = input.into_value(call.head);
+        let span = input.span();
+        let input = match input {
+            Value::CustomValue { val, .. } => {
+                match val.as_any().downcast_ref::<PluginCustomValue>() {
+                    Some(plugin_data) if plugin_data.filename == self.filename => {
+                        CallInput::Data(PluginData {
+                            data: plugin_data.data.clone(),
+                            span,
+                        })
+                    }
+                    _ => {
+                        let custom_value_name = val.value_string();
+                        return Err(ShellError::GenericError(
+                            format!(
+                                "Plugin {} can not handle the custom value {}",
+                                self.name, custom_value_name
+                            ),
+                            format!("custom value {custom_value_name}"),
+                            Some(span),
+                            None,
+                            Vec::new(),
+                        ));
+                    }
+                }
+            }
+            Value::LazyRecord { val, .. } => CallInput::Value(val.collect()?),
+            value => CallInput::Value(value),
+        };
+        Ok(input)
     }
 }
 
@@ -96,40 +132,13 @@ impl Command for PluginDeclaration {
             }
         })?;
 
-        let input = input.into_value(call.head);
-        let span = input.span();
-        let input = match input {
-            Value::CustomValue { val, .. } => {
-                match val.as_any().downcast_ref::<PluginCustomValue>() {
-                    Some(plugin_data) if plugin_data.filename == self.filename => {
-                        CallInput::Data(PluginData {
-                            data: plugin_data.data.clone(),
-                            span,
-                        })
-                    }
-                    _ => {
-                        let custom_value_name = val.value_string();
-                        return Err(ShellError::GenericError {
-                            error: format!(
-                                "Plugin {} can not handle the custom value {}",
-                                self.name, custom_value_name
-                            ),
-                            msg: format!("custom value {custom_value_name}"),
-                            span: Some(span),
-                            help: None,
-                            inner: vec![],
-                        });
-                    }
-                }
-            }
-            Value::LazyRecord { val, .. } => CallInput::Value(val.collect()?),
-            value => CallInput::Value(value),
-        };
+        let mut call_input = self.make_call_input(input, call)?;
+        let join_handle = call_input.pipe()?;
 
         let plugin_call = PluginCall::CallInfo(CallInfo {
             name: self.name.clone(),
             call: EvaluatedCall::try_from_call(call, engine_state, stack)?,
-            input,
+            input: call_input,
         });
 
         let encoding = {
@@ -153,6 +162,10 @@ impl Command for PluginDeclaration {
                 inner: vec![],
             }
         });
+
+        if let Some(join_handle) = join_handle {
+            _ = join_handle.join();
+        }
 
         let pipeline_data = match response {
             Ok(PluginResponse::Value(value)) => {

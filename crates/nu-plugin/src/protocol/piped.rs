@@ -1,7 +1,12 @@
-use std::io::Read;
+use std::{
+    io::{Read, Write},
+    thread::JoinHandle,
+};
 
-use nu_protocol::{CustomValue, ShellError, Span, Value};
+use nu_protocol::{CustomValue, PipelineData, ShellError, Span, Value};
 use serde::{Deserialize, Serialize};
+
+use super::CallInput;
 
 #[cfg(windows)]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -44,12 +49,19 @@ impl OsPipe {
         }
         #[cfg(windows)]
         {
+            use windows::Win32::Security::SECURITY_ATTRIBUTES;
             use windows::Win32::System::Pipes::CreatePipe;
 
             let mut read_handle = windows::Win32::Foundation::INVALID_HANDLE_VALUE;
             let mut write_handle = windows::Win32::Foundation::INVALID_HANDLE_VALUE;
 
-            unsafe { CreatePipe(&mut read_handle, &mut write_handle, None, 0) }
+            let attributes = SECURITY_ATTRIBUTES {
+                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: std::ptr::null_mut(),
+                bInheritHandle: true.into(),
+            };
+
+            unsafe { CreatePipe(&mut read_handle, &mut write_handle, Some(&attributes), 0) }
                 .map_err(|e| PipeError::FailedToCreatePipe(OSError(e)))?;
 
             Ok(OsPipe {
@@ -79,7 +91,7 @@ impl OsPipe {
         }
         #[cfg(windows)]
         {
-            use windows::Win32::System::Pipes::CloseHandle;
+            use windows::Win32::Foundation::CloseHandle;
 
             let read_res = self
                 .read_handle
@@ -88,8 +100,11 @@ impl OsPipe {
                 .write_handle
                 .map(|handle| unsafe { CloseHandle(handle) });
 
-            if read_res.is_err() || write_res.is_err() {
-                return Err(PipeError::FailedToClose);
+            if let Some(e) = vec![read_res, write_res]
+                .iter()
+                .find_map(|res| res.as_ref().map(|e| e.as_ref().err()).flatten())
+            {
+                return Err(PipeError::FailedToClose(Some(OSError(e.clone()))));
             }
 
             Ok(())
@@ -226,7 +241,7 @@ impl CustomValue for StreamCustomValue {
 
     #[doc(hidden)]
     fn typetag_deserialize(&self) {
-        todo!()
+        unimplemented!("typetag_deserialize")
     }
 }
 
@@ -242,7 +257,7 @@ pub enum PipeError {
     UnexpectedInvalidPipeHandle,
     FailedToCreatePipe(OSError),
     UnsupportedPlatform,
-    FailedToClose,
+    FailedToClose(Option<OSError>),
 }
 
 impl From<PipeError> for ShellError {
@@ -262,7 +277,12 @@ impl From<PipeError> for ShellError {
             PipeError::UnsupportedPlatform => {
                 ShellError::IOError("Unsupported platform for pipes".to_string())
             }
-            PipeError::FailedToClose => ShellError::IOError("Failed to close pipe".to_string()),
+            PipeError::FailedToClose(e) => match e {
+                Some(e) => {
+                    ShellError::IOError(format!("Failed to close pipe: {}", e.0.to_string()))
+                }
+                None => ShellError::IOError("Failed to close pipe".to_string()),
+            },
         }
     }
 }
@@ -337,6 +357,32 @@ pub mod windows_handle_serialization {
             .as_ref()
             .map(|handle: &windows::Win32::Foundation::HANDLE| WrappedHandle(handle.clone()));
         opt_wrapped.serialize(serializer)
+    }
+}
+
+impl CallInput {
+    pub fn pipe(&mut self) -> Result<Option<JoinHandle<()>>, ShellError> {
+        match self {
+            CallInput::Pipe(os_pipe, Some(PipelineData::ExternalStream { stdout, .. })) => {
+                let handle = {
+                    // unsafely move the stdout stream to the new thread by casting to a void pointer
+                    let stdout = std::mem::replace(stdout, None).unwrap();
+                    let os_pipe = os_pipe.clone();
+
+                    std::thread::spawn(move || {
+                        let mut os_pipe = os_pipe;
+                        let stdout = stdout;
+
+                        for e in stdout.stream {
+                            let _ = os_pipe.write(e.unwrap().as_slice());
+                        }
+                    })
+                };
+
+                Ok(Some(handle))
+            }
+            _ => Ok(None),
+        }
     }
 }
 
@@ -426,11 +472,17 @@ mod tests {
         // spawn a new process
         let res = std::process::Command::new("cargo")
             .arg("run")
+            .arg("-q")
             .arg("--bin")
             .arg("nu_plugin_pipe_echoer")
             .arg(serialized)
             .output()
             .unwrap();
+
+        if !res.status.success() {
+            eprintln!("stderr: {}", String::from_utf8_lossy(res.stderr.as_slice()));
+            assert!(false);
+        }
 
         assert_eq!(res.status.success(), true);
         assert_eq!(
