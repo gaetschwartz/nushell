@@ -384,7 +384,6 @@ mod tests {
         assert_eq!(read, 11);
         assert_eq!(buf, "hello world".as_bytes());
 
-        deserialized.close().unwrap();
         pipe.close().unwrap();
     }
 
