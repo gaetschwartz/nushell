@@ -1,17 +1,12 @@
-use std::{
-    io::{Read, Write},
-    thread::JoinHandle,
-};
 
-use nu_protocol::{CustomValue, PipelineData, ShellError, Span, Value};
+
+use nu_protocol::{Span, StreamDataType};
 use serde::{Deserialize, Serialize};
 
-use super::CallInput;
-
-type HandleType = libc::c_int;
+use super::PipeError;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub(crate) struct OsPipe {
+pub struct OsPipe {
     pub span: Span,
     pub datatype: StreamDataType,
 
@@ -30,7 +25,7 @@ impl OsPipe {
                 span,
                 read_fd: fds[0],
                 write_fd: fds[1],
-                data_type: DataType::Binary,
+                datatype: StreamDataType::Binary,
             })
         } else {
             Err(PipeError::UnexpectedInvalidPipeHandle)
