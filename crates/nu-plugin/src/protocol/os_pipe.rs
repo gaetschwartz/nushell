@@ -8,10 +8,17 @@ use serde::{Deserialize, Serialize};
 
 use super::CallInput;
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub enum DataType {
+    Binary,
+    Text,
+}
+
 #[cfg(windows)]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct OsPipe {
     pub span: Span,
+    pub data_type: DataType,
 
     #[serde(with = "windows_handle_serialization")]
     read_handle: Option<windows::Win32::Foundation::HANDLE>,
@@ -24,6 +31,7 @@ pub struct OsPipe {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct OsPipe {
     pub span: Span,
+    pub data_type: DataType,
 
     read_fd: libc::c_int,
     write_fd: libc::c_int,
@@ -42,6 +50,7 @@ impl OsPipe {
                     span,
                     read_fd: fds[0],
                     write_fd: fds[1],
+                    data_type: DataType::Binary,
                 })
             } else {
                 Err(PipeError::UnexpectedInvalidPipeHandle)
@@ -68,6 +77,7 @@ impl OsPipe {
                 span,
                 read_handle: Some(read_handle),
                 write_handle: Some(write_handle),
+                data_type: DataType::Binary,
             })
         }
         #[cfg(not(any(unix, windows)))]
@@ -84,7 +94,7 @@ impl OsPipe {
             let (read_res, write_res) = unsafe { (close(self.read_fd), close(self.write_fd)) };
 
             if read_res < 0 || write_res < 0 {
-                return Err(PipeError::FailedToClose);
+                return Err(PipeError::FailedToClose(None));
             }
 
             Ok(())
@@ -229,7 +239,13 @@ impl CustomValue for StreamCustomValue {
     fn to_base_value(&self, span: Span) -> Result<Value, ShellError> {
         let val = Vec::new();
         _ = self.os_pipe.clone().read_to_end(&mut val.clone())?;
-        Ok(Value::binary(val, span))
+        match self.os_pipe.data_type {
+            DataType::Binary => Ok(Value::binary(val, span)),
+            DataType::Text => Ok(Value::string(
+                String::from_utf8_lossy(&val).to_string(),
+                span,
+            )),
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -374,6 +390,9 @@ impl CallInput {
                     std::thread::spawn(move || {
                         let mut os_pipe = os_pipe;
                         let stdout = stdout;
+                        if !stdout.is_binary {
+                            os_pipe.data_type = DataType::Text;
+                        }
 
                         for e in stdout.stream {
                             let _ = os_pipe.write(e.unwrap().as_slice());
