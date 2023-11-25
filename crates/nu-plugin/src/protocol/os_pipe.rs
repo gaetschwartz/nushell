@@ -221,7 +221,9 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn value_string(&self) -> String {
-        "StreamCustomValue".to_string()
+        self.to_base_value(self.span)
+            .map(|v| v.as_string().unwrap_or_default())
+            .unwrap_or_default()
     }
 
     fn to_base_value(&self, span: Span) -> Result<Value, ShellError> {

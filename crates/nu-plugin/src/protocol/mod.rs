@@ -1,11 +1,11 @@
 mod evaluated_call;
-mod piped;
+mod os_pipe;
 mod plugin_custom_value;
 mod plugin_data;
 
 pub use evaluated_call::EvaluatedCall;
 use nu_protocol::{PipelineData, PluginSignature, ShellError, Span, Value};
-pub use piped::{OsPipe, StreamCustomValue};
+pub use os_pipe::{OsPipe, StreamCustomValue};
 pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
 use serde::{Deserialize, Serialize};
