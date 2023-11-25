@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::*;
 use std::{
     fmt::Debug,
@@ -8,9 +10,15 @@ pub struct RawStream {
     pub stream: Box<dyn Iterator<Item = Result<Vec<u8>, ShellError>> + Send + 'static>,
     pub leftover: Vec<u8>,
     pub ctrlc: Option<Arc<AtomicBool>>,
-    pub is_binary: bool,
+    pub datatype: StreamDataType,
     pub span: Span,
     pub known_size: Option<u64>, // (bytes)
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StreamDataType {
+    Binary,
+    Text,
 }
 
 impl RawStream {
@@ -24,7 +32,7 @@ impl RawStream {
             stream,
             leftover: vec![],
             ctrlc,
-            is_binary: false,
+            datatype: StreamDataType::Text,
             span,
             known_size,
         }
@@ -66,7 +74,7 @@ impl RawStream {
             stream: Box::new(self.stream.chain(stream.stream)),
             leftover: self.leftover.into_iter().chain(stream.leftover).collect(),
             ctrlc: self.ctrlc,
-            is_binary: self.is_binary,
+            datatype: self.datatype,
             span: self.span,
             known_size: self.known_size,
         }
@@ -100,8 +108,8 @@ impl Iterator for RawStream {
         }
 
         // If we know we're already binary, just output that
-        if self.is_binary {
-            self.stream.next().map(|buffer| {
+        match self.datatype {
+            StreamDataType::Binary => self.stream.next().map(|buffer| {
                 buffer.map(|mut v| {
                     if !self.leftover.is_empty() {
                         for b in self.leftover.drain(..).rev() {
@@ -110,66 +118,68 @@ impl Iterator for RawStream {
                     }
                     Value::binary(v, self.span)
                 })
-            })
-        } else {
-            // We *may* be text. We're only going to try utf-8. Other decodings
-            // needs to be taken as binary first, then passed through `decode`.
-            if let Some(buffer) = self.stream.next() {
-                match buffer {
-                    Ok(mut v) => {
-                        if !self.leftover.is_empty() {
-                            while let Some(b) = self.leftover.pop() {
-                                v.insert(0, b);
+            }),
+            StreamDataType::Text => {
+                // We *may* be text. We're only going to try utf-8. Other decodings
+                // needs to be taken as binary first, then passed through `decode`.
+                if let Some(buffer) = self.stream.next() {
+                    match buffer {
+                        Ok(mut v) => {
+                            if !self.leftover.is_empty() {
+                                while let Some(b) = self.leftover.pop() {
+                                    v.insert(0, b);
+                                }
                             }
-                        }
 
-                        match String::from_utf8(v.clone()) {
-                            Ok(s) => {
-                                // Great, we have a complete string, let's output it
-                                Some(Ok(Value::string(s, self.span)))
-                            }
-                            Err(err) => {
-                                // Okay, we *might* have a string but we've also got some errors
-                                if v.is_empty() {
-                                    // We can just end here
-                                    None
-                                } else if v.len() > 3
-                                    && (v.len() - err.utf8_error().valid_up_to() > 3)
-                                {
-                                    // As UTF-8 characters are max 4 bytes, if we have more than that in error we know
-                                    // that it's not just a character spanning two frames.
-                                    // We now know we are definitely binary, so switch to binary and stay there.
-                                    self.is_binary = true;
-                                    Some(Ok(Value::binary(v, self.span)))
-                                } else {
-                                    // Okay, we have a tiny bit of error at the end of the buffer. This could very well be
-                                    // a character that spans two frames. Since this is the case, remove the error from
-                                    // the current frame an dput it in the leftover buffer.
-                                    self.leftover = v[err.utf8_error().valid_up_to()..].to_vec();
+                            match String::from_utf8(v.clone()) {
+                                Ok(s) => {
+                                    // Great, we have a complete string, let's output it
+                                    Some(Ok(Value::string(s, self.span)))
+                                }
+                                Err(err) => {
+                                    // Okay, we *might* have a string but we've also got some errors
+                                    if v.is_empty() {
+                                        // We can just end here
+                                        None
+                                    } else if v.len() > 3
+                                        && (v.len() - err.utf8_error().valid_up_to() > 3)
+                                    {
+                                        // As UTF-8 characters are max 4 bytes, if we have more than that in error we know
+                                        // that it's not just a character spanning two frames.
+                                        // We now know we are definitely binary, so switch to binary and stay there.
+                                        self.datatype = StreamDataType::Binary;
+                                        Some(Ok(Value::binary(v, self.span)))
+                                    } else {
+                                        // Okay, we have a tiny bit of error at the end of the buffer. This could very well be
+                                        // a character that spans two frames. Since this is the case, remove the error from
+                                        // the current frame an dput it in the leftover buffer.
+                                        self.leftover =
+                                            v[err.utf8_error().valid_up_to()..].to_vec();
 
-                                    let buf = v[0..err.utf8_error().valid_up_to()].to_vec();
+                                        let buf = v[0..err.utf8_error().valid_up_to()].to_vec();
 
-                                    match String::from_utf8(buf) {
-                                        Ok(s) => Some(Ok(Value::string(s, self.span))),
-                                        Err(_) => {
-                                            // Something is definitely wrong. Switch to binary, and stay there
-                                            self.is_binary = true;
-                                            Some(Ok(Value::binary(v, self.span)))
+                                        match String::from_utf8(buf) {
+                                            Ok(s) => Some(Ok(Value::string(s, self.span))),
+                                            Err(_) => {
+                                                // Something is definitely wrong. Switch to binary, and stay there
+                                                self.datatype = StreamDataType::Binary;
+                                                Some(Ok(Value::binary(v, self.span)))
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                        Err(e) => Some(Err(e)),
                     }
-                    Err(e) => Some(Err(e)),
-                }
-            } else if !self.leftover.is_empty() {
-                let output = Ok(Value::binary(self.leftover.clone(), self.span));
-                self.leftover.clear();
+                } else if !self.leftover.is_empty() {
+                    let output = Ok(Value::binary(self.leftover.clone(), self.span));
+                    self.leftover.clear();
 
-                Some(output)
-            } else {
-                None
+                    Some(output)
+                } else {
+                    None
+                }
             }
         }
     }

@@ -1,7 +1,7 @@
 use crate::{
     ast::{Call, PathMember},
     engine::{EngineState, Stack, StateWorkingSet},
-    format_error, Config, ListStream, RawStream, ShellError, Span, Value,
+    format_error, Config, ListStream, RawStream, ShellError, Span, StreamDataType, Value,
 };
 use nu_utils::{stderr_write_all_and_flush, stdout_write_all_and_flush};
 use std::sync::{atomic::AtomicBool, Arc};
@@ -177,38 +177,41 @@ impl PipelineData {
 
                 // NOTE: currently trim-end-newline only handles for string output.
                 // For binary, user might need origin data.
-                if s.is_binary {
-                    let mut output = vec![];
-                    for item in items {
-                        match item.as_binary() {
-                            Ok(item) => {
-                                output.extend(item);
-                            }
-                            Err(err) => {
-                                return Value::error(err, span);
+                match s.datatype {
+                    StreamDataType::Binary => {
+                        let mut output = vec![];
+                        for item in items {
+                            match item.as_binary() {
+                                Ok(item) => {
+                                    output.extend(item);
+                                }
+                                Err(err) => {
+                                    return Value::error(err, span);
+                                }
                             }
                         }
-                    }
 
-                    Value::binary(
-                        output, span, // FIXME?
-                    )
-                } else {
-                    let mut output = String::new();
-                    for item in items {
-                        match item.as_string() {
-                            Ok(s) => output.push_str(&s),
-                            Err(err) => {
-                                return Value::error(err, span);
+                        Value::binary(
+                            output, span, // FIXME?
+                        )
+                    }
+                    StreamDataType::Text => {
+                        let mut output = String::new();
+                        for item in items {
+                            match item.as_string() {
+                                Ok(s) => output.push_str(&s),
+                                Err(err) => {
+                                    return Value::error(err, span);
+                                }
                             }
                         }
+                        if trim_end_newline {
+                            output.truncate(output.trim_end_matches(LINE_ENDING_PATTERN).len())
+                        }
+                        Value::string(
+                            output, span, // FIXME?
+                        )
                     }
-                    if trim_end_newline {
-                        output.truncate(output.trim_end_matches(LINE_ENDING_PATTERN).len())
-                    }
-                    Value::string(
-                        output, span, // FIXME?
-                    )
                 }
             }
         }

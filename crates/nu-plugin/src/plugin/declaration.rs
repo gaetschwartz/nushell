@@ -30,7 +30,10 @@ impl PluginDeclaration {
     }
 
     fn make_call_input(&self, input: PipelineData, call: &Call) -> Result<CallInput, ShellError> {
-        if let PipelineData::ExternalStream { .. } = input {
+        if let PipelineData::ExternalStream {
+            stdout: Some(_), ..
+        } = input
+        {
             return Ok(CallInput::Pipe(OsPipe::create(call.head)?, Some(input)));
         }
         let input = input.into_value(call.head);
@@ -133,7 +136,7 @@ impl Command for PluginDeclaration {
         })?;
 
         let mut call_input = self.make_call_input(input, call)?;
-        let join_handle = call_input.pipe()?;
+        let join_handle = OsPipe::start_pipe(&mut call_input)?;
 
         let plugin_call = PluginCall::CallInfo(CallInfo {
             name: self.name.clone(),
