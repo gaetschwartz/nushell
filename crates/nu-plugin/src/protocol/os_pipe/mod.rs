@@ -1,9 +1,11 @@
 use std::{
     io::{Read, Write},
+    process::Command,
     thread::JoinHandle,
 };
 
-use nu_protocol::{CustomValue, PipelineData, ShellError, Span, Spanned, StreamDataType, Value};
+use nu_protocol::{PipelineData, ShellError, Span};
+pub use pipe_custom_value::StreamCustomValue;
 use serde::{Deserialize, Serialize};
 
 pub use self::pipe_impl::OsPipe;
@@ -14,151 +16,45 @@ trait OsPipeTrait: Read + Write + Send + Sync + Serialize + Deserialize<'static>
 }
 
 use super::CallInput;
+mod pipe_custom_value;
 #[cfg_attr(windows, path = "windows.rs")]
 #[cfg_attr(unix, path = "unix.rs")]
 mod pipe_impl;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct StreamCustomValue {
-    pub span: Span,
-    pub os_pipe: OsPipe,
-    vec: Option<Vec<u8>>,
-}
-
-impl StreamCustomValue {
-    pub fn new(os_pipe: OsPipe, span: Span) -> Self {
-        Self {
-            span,
-            os_pipe,
-            vec: None,
-        }
-    }
-
-    pub fn read_pipe_to_end(&mut self) -> Result<&Vec<u8>, ShellError> {
-        if let None = self.vec {
-            let mut vec = Vec::new();
-            _ = self.os_pipe.clone().read_to_end(&mut vec)?;
-            self.vec = Some(vec);
-        }
-        if let Some(vec) = &self.vec {
-            Ok(vec)
-        } else {
-            unreachable!()
-        }
-    }
-}
-
-impl CustomValue for StreamCustomValue {
-    fn clone_value(&self, span: Span) -> Value {
-        Value::custom_value(Box::new(self.clone()), span)
-    }
-
-    fn value_string(&self) -> String {
-        self.to_base_value(self.span)
-            .map(|v| v.as_string().unwrap_or_default())
-            .unwrap_or_default()
-    }
-
-    fn to_base_value(&self, span: Span) -> Result<Value, ShellError> {
-        match self.os_pipe.datatype {
-            StreamDataType::Binary => {
-                let val = Vec::new();
-                _ = self.os_pipe.clone().read_to_end(&mut val.clone())?;
-                Ok(Value::binary(val, span))
-            }
-            StreamDataType::Text => {
-                let mut vec = Vec::new();
-                _ = self.os_pipe.clone().read_to_end(&mut vec)?;
-                let string = String::from_utf8_lossy(&vec);
-                Ok(Value::string(string, span))
-            }
-        }
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn span(&self) -> Span {
-        self.span
-    }
-
-    #[doc(hidden)]
-    fn typetag_name(&self) -> &'static str {
-        match self.os_pipe.datatype {
-            StreamDataType::Binary => "StreamCustomValue::Binary",
-            StreamDataType::Text => "StreamCustomValue::Text",
-        }
-    }
-
-    #[doc(hidden)]
-    fn typetag_deserialize(&self) {
-        unimplemented!("typetag_deserialize")
-    }
-
-    fn as_binary(&self) -> Result<&[u8], ShellError> {
-        let vec = self.vec.as_ref().ok_or_else(|| ShellError::CantConvert {
-            to_type: "binary".into(),
-            from_type: self.typetag_name().into(),
-            span: self.span(),
-            help: None,
-        })?;
-        Ok(vec.as_slice())
-    }
-
-    fn as_string(&self) -> Result<String, ShellError> {
-        self.as_binary()
-            .map(|b| String::from_utf8_lossy(b).to_string())
-    }
-
-    fn as_spanned_string(&self) -> Result<nu_protocol::Spanned<String>, ShellError> {
-        self.as_binary()
-            .map(|b| String::from_utf8_lossy(b).to_string())
-            .map(|s| Spanned {
-                item: s,
-                span: self.span,
-            })
-    }
-}
-
-impl std::io::Read for StreamCustomValue {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.os_pipe.read(buf)
-    }
-}
-
 #[derive(Debug)]
 pub enum PipeError {
-    InvalidPipeName(String),
     UnexpectedInvalidPipeHandle,
     FailedToCreatePipe(OSError),
     UnsupportedPlatform,
-    FailedToClose(Option<OSError>),
+    FailedToClose(Vec<(Handles, OSError)>),
 }
 
 impl From<PipeError> for ShellError {
     fn from(error: PipeError) -> Self {
         match error {
-            PipeError::InvalidPipeName(name) => ShellError::IncorrectValue {
-                msg: format!("Invalid pipe name: {}", name),
-                val_span: Span::unknown(),
-                call_span: Span::unknown(),
-            },
             PipeError::UnexpectedInvalidPipeHandle => {
                 ShellError::IOError("Unexpected invalid pipe handle".to_string())
             }
             PipeError::FailedToCreatePipe(error) => {
-                ShellError::IOError(format!("Failed to create pipe: {}", error.0.to_string()))
+                ShellError::IOError(format!("Failed to create pipe: {}", error.0))
             }
             PipeError::UnsupportedPlatform => {
                 ShellError::IOError("Unsupported platform for pipes".to_string())
             }
-            PipeError::FailedToClose(e) => match e {
-                Some(e) => {
-                    ShellError::IOError(format!("Failed to close pipe: {}", e.0.to_string()))
+            PipeError::FailedToClose(v) => {
+                let mut s = String::from("Failed to close pipe");
+                if v.len() > 1 {
+                    s.push('s');
                 }
-                None => ShellError::IOError("Failed to close pipe".to_string()),
-            },
+                s.push_str(": ");
+                s.push_str(
+                    &v.iter()
+                        .map(|(h, e)| format!("{} ({})", h, e.0))
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                );
+                ShellError::IOError(s)
+            }
         }
     }
 }
@@ -172,7 +68,7 @@ impl OsPipe {
             CallInput::Pipe(os_pipe, Some(PipelineData::ExternalStream { stdout, .. })) => {
                 let handle = {
                     // unsafely move the stdout stream to the new thread by casting to a void pointer
-                    let stdout = std::mem::replace(stdout, None);
+                    let stdout = stdout.take();
                     let Some(stdout) = stdout else {
                         return Ok(None);
                     };
@@ -182,12 +78,93 @@ impl OsPipe {
                         let mut os_pipe = os_pipe;
                         let stdout = stdout;
                         os_pipe.datatype = stdout.datatype;
-
-                        for e in stdout.stream {
-                            if let Ok(ref e) = e {
-                                let _ = os_pipe.write(e.as_slice());
-                            }
+                        #[cfg(unix)]
+                        {
+                            let pid = std::process::id();
+                            let res_self = Command::new("ps")
+                                .arg("-o")
+                                .arg("comm=")
+                                .arg("-p")
+                                .arg(pid.to_string())
+                                .output();
+                            let self_name = match res_self {
+                                Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
+                                Err(_) => "".to_string(),
+                            };
+                            eprintln!("thread::self: {} {:?}", pid, self_name);
+                            let ppid = std::os::unix::process::parent_id();
+                            let res_parent = Command::new("ps")
+                                .arg("-o")
+                                .arg("comm=")
+                                .arg("-p")
+                                .arg(ppid.to_string())
+                                .output();
+                            let parent_name = match res_parent {
+                                Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
+                                Err(_) => "".to_string(),
+                            };
+                            eprintln!("thread::parent: {} {:?}", ppid, parent_name);
+                            let open_fds = Command::new("lsof")
+                                .arg("-p")
+                                .arg(pid.to_string())
+                                .output()
+                                .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+                                .unwrap_or_else(|_| "".to_string());
+                            eprintln!("thread::open fds: \n{}", open_fds);
+                            // get permissions and other info for read_fd
+                            let info = unsafe { libc::fcntl(os_pipe.write_fd, libc::F_GETFL) };
+                            let acc_mode = match info & libc::O_ACCMODE {
+                                libc::O_RDONLY => "read-only".to_string(),
+                                libc::O_WRONLY => "write-only".to_string(),
+                                libc::O_RDWR => "read-write".to_string(),
+                                e => format!("unknown access mode {}", e),
+                            };
+                            eprintln!("thread::write_fd::access mode: {}", acc_mode);
+                            let info = unsafe { libc::fcntl(os_pipe.read_fd, libc::F_GETFL) };
+                            let acc_mode = match info & libc::O_ACCMODE {
+                                libc::O_RDONLY => "read-only".to_string(),
+                                libc::O_WRONLY => "write-only".to_string(),
+                                libc::O_RDWR => "read-write".to_string(),
+                                e => format!("unknown access mode {}", e),
+                            };
+                            eprintln!("thread::read_fd::access mode: {}", acc_mode);
                         }
+                        eprintln!("OsPipe::start_pipe thread for {:?}", os_pipe);
+
+                        stdout.stream.for_each(|e| match e {
+                            Ok(ref e) => {
+                                let written = os_pipe.write(e.as_slice());
+                                match written {
+                                    Ok(written) => {
+                                        if written != e.len() {
+                                            eprintln!(
+                                                "OsPipe::start_pipe thread partial write to pipe: \
+                                             {} bytes written",
+                                                written
+                                            );
+                                        } else {
+                                            eprintln!(
+                                                "OsPipe::start_pipe thread wrote {} bytes to pipe",
+                                                written
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "OsPipe::start_pipe thread error: failed to write to \
+                                         pipe: {:?}",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("OsPipe::start_pipe thread error: {:?}", e);
+                            }
+                        });
+                        eprintln!("OsPipe::start_pipe thread finished writing to pipe");
+                        let _ = os_pipe.close(Handles::write());
+                        // close the pipe when the stream is finished
                     })
                 };
 
@@ -201,8 +178,51 @@ impl OsPipe {
 #[derive(Debug)]
 pub struct OSError(
     #[cfg(windows)] windows::core::Error,
-    #[cfg(not(windows))] std::io::Error,
+    #[cfg(unix)] std::io::Error,
 );
+
+#[cfg(unix)]
+impl From<std::io::Error> for OSError {
+    fn from(error: std::io::Error) -> Self {
+        OSError(error)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+
+pub enum Handles {
+    Read,
+    Write,
+}
+
+impl Handles {
+    pub fn all() -> Vec<Handles> {
+        vec![Handles::Read, Handles::Write]
+    }
+
+    pub fn read() -> Vec<Handles> {
+        vec![Handles::Read]
+    }
+
+    pub fn write() -> Vec<Handles> {
+        vec![Handles::Write]
+    }
+}
+
+impl From<Handles> for Vec<Handles> {
+    fn from(val: Handles) -> Self {
+        vec![val]
+    }
+}
+
+impl std::fmt::Display for Handles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Handles::Read => write!(f, "read"),
+            Handles::Write => write!(f, "write"),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -224,8 +244,6 @@ mod tests {
 
         assert_eq!(read, 11);
         assert_eq!(buf, "hello world".as_bytes());
-
-        pipe.close().unwrap();
     }
 
     #[test]
@@ -238,6 +256,7 @@ mod tests {
 
         // serialize the pipe
         let serialized = serde_json::to_string(&pipe).unwrap();
+        println!("{}", serialized);
         // deserialize the pipe
         let mut deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
 
@@ -247,8 +266,6 @@ mod tests {
 
         assert_eq!(read, 11);
         assert_eq!(buf, "hello world".as_bytes());
-
-        pipe.close().unwrap();
     }
 
     #[test]
@@ -272,8 +289,6 @@ mod tests {
 
             assert_eq!(read, 11);
             assert_eq!(buf, "hello world".as_bytes());
-
-            deserialized.close().unwrap();
         });
     }
 
@@ -304,7 +319,7 @@ mod tests {
 
         assert_eq!(res.status.success(), true);
         assert_eq!(
-            String::from_utf8_lossy(res.stdout.as_slice()),
+            String::from_utf8_lossy(res.stderr.as_slice()),
             "hello world\n"
         );
     }
