@@ -9,34 +9,11 @@ use crate::{Handles, OsPipe};
 pub struct StreamCustomValue {
     pub span: Span,
     pub os_pipe: OsPipe,
-    vec: Option<Vec<u8>>,
 }
 
 impl StreamCustomValue {
     pub fn new(os_pipe: OsPipe, span: Span) -> Self {
-        Self {
-            span,
-            os_pipe,
-            vec: None,
-        }
-    }
-
-    pub fn read_pipe_to_end(&mut self) -> Result<&Vec<u8>, ShellError> {
-        eprintln!(
-            "{}::read_pipe_to_end for {:?}",
-            self.typetag_name(),
-            self.os_pipe
-        );
-        if self.vec.is_none() {
-            let mut vec = Vec::new();
-            _ = self.os_pipe.clone().read_to_end(&mut vec)?;
-            self.vec = Some(vec);
-        }
-        if let Some(vec) = &self.vec {
-            Ok(vec)
-        } else {
-            unreachable!()
-        }
+        Self { span, os_pipe }
     }
 }
 
@@ -96,16 +73,6 @@ impl CustomValue for StreamCustomValue {
     #[doc(hidden)]
     fn typetag_deserialize(&self) {
         unimplemented!("typetag_deserialize")
-    }
-
-    fn as_binary(&self) -> Result<&[u8], ShellError> {
-        let vec = self.vec.as_ref().ok_or_else(|| ShellError::CantConvert {
-            to_type: "binary".into(),
-            from_type: self.typetag_name().into(),
-            span: self.span(),
-            help: None,
-        })?;
-        Ok(vec.as_slice())
     }
 
     fn as_string(&self) -> Result<String, ShellError> {
@@ -170,18 +137,77 @@ impl CustomValue for StreamCustomValue {
                 eprintln!("plugin::write_fd::access mode: {}", acc_mode);
             }
         }
-        let mut vec = Vec::new();
-        _ = self.os_pipe.clone().read_to_end(&mut vec)?;
+        let vec = self.read_as_string()?;
         self.os_pipe.close(Handles::read())?;
-        Ok(String::from_utf8_lossy(&vec).to_string())
+        Ok(vec)
     }
 
     fn as_spanned_string(&self) -> Result<nu_protocol::Spanned<String>, ShellError> {
-        self.as_binary()
-            .map(|b| String::from_utf8_lossy(b).to_string())
-            .map(|s| Spanned {
-                item: s,
-                span: self.span,
-            })
+        Ok(Spanned {
+            item: self.read_as_string()?,
+            span: self.span,
+        })
+    }
+}
+
+impl std::io::Read for StreamCustomValue {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        eprintln!("StreamCustomValue::read for {:?}", self.os_pipe);
+        self.os_pipe.read(buf)
+    }
+}
+
+impl IntoIterator for StreamCustomValue {
+    type Item = Result<Vec<u8>, ShellError>;
+
+    type IntoIter = StreamCustomValueIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        StreamCustomValueIterator {
+            stream: self,
+            done: false,
+            buf: [0u8; READ_SIZE],
+        }
+    }
+}
+
+pub struct StreamCustomValueIterator {
+    stream: StreamCustomValue,
+    done: bool,
+    buf: [u8; READ_SIZE],
+}
+
+const READ_SIZE: usize = 1024;
+
+impl Iterator for StreamCustomValueIterator {
+    type Item = Result<Vec<u8>, ShellError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        let res = self.stream.read(&mut self.buf);
+        match res {
+            Ok(0) => {
+                self.done = true;
+                None
+            }
+            Ok(_) => Some(Ok(self.buf.to_vec())),
+            Err(e) => Some(Err(ShellError::CantConvert {
+                to_type: "binary".into(),
+                from_type: self.stream.typetag_name().into(),
+                span: self.stream.span(),
+                help: Some(e.to_string()),
+            })),
+        }
+    }
+}
+
+impl StreamCustomValue {
+    fn read_as_string(&self) -> Result<String, ShellError> {
+        let mut vec = Vec::new();
+        _ = self.clone().read_to_end(&mut vec)?;
+        let string = String::from_utf8_lossy(&vec);
+        Ok(string.to_string())
     }
 }
