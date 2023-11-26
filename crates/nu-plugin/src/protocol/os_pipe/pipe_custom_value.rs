@@ -1,4 +1,4 @@
-use std::{io::Read, process::Command};
+use std::io::Read;
 
 use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value};
 use serde::{Deserialize, Serialize};

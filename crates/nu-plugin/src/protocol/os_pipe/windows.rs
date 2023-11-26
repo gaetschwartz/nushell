@@ -1,7 +1,7 @@
 use nu_protocol::{Span, StreamDataType};
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::os_pipe::OSError;
+use crate::{protocol::os_pipe::OSError, Handles};
 
 use super::PipeError;
 
@@ -13,10 +13,10 @@ pub struct OsPipe {
     pub datatype: StreamDataType,
 
     #[serde(with = "windows_handle_serialization")]
-    read_handle: Option<HandleType>,
+    read_handle: HandleType,
 
     #[serde(with = "windows_handle_serialization")]
-    write_handle: Option<HandleType>,
+    write_handle: HandleType,
 }
 
 impl OsPipe {
@@ -38,27 +38,29 @@ impl OsPipe {
 
         Ok(OsPipe {
             span,
-            read_handle: Some(read_handle),
-            write_handle: Some(write_handle),
+            read_handle: read_handle,
+            write_handle: write_handle,
             datatype: StreamDataType::Binary,
         })
     }
 
-    pub fn close(&mut self) -> Result<(), PipeError> {
+    pub fn close(&self, handles: Vec<Handles>) -> Result<(), PipeError> {
         use windows::Win32::Foundation::CloseHandle;
 
-        let read_res = self
-            .read_handle
-            .map(|handle| unsafe { CloseHandle(handle) });
-        let write_res = self
-            .write_handle
-            .map(|handle| unsafe { CloseHandle(handle) });
+        let errors = handles
+            .into_iter()
+            .filter_map(|handle| {
+                match &handle {
+                    Handles::Read => unsafe { CloseHandle(self.read_handle) },
+                    Handles::Write => unsafe { CloseHandle(self.write_handle) },
+                }
+                .err()
+                .map(|e| (handle, OSError(e)))
+            })
+            .collect::<Vec<_>>();
 
-        if let Some(e) = vec![read_res, write_res]
-            .iter()
-            .find_map(|res| res.as_ref().map(|e| e.as_ref().err()).flatten())
-        {
-            return Err(PipeError::FailedToClose(Some(OSError(e.clone()))));
+        if !errors.is_empty() {
+            return Err(PipeError::FailedToClose(errors));
         }
 
         Ok(())
@@ -67,18 +69,13 @@ impl OsPipe {
 
 impl std::io::Read for OsPipe {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        eprintln!("OsPipe::read for {:?}", self);
+        let _ = unsafe { windows::Win32::Foundation::CloseHandle(self.write_handle) }?;
+
         let mut bytes_read = 0;
-
-        let Some(read_handle) = self.read_handle else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Missing read handle",
-            ));
-        };
-
         unsafe {
             windows::Win32::Storage::FileSystem::ReadFile(
-                read_handle,
+                self.read_handle,
                 Some(buf),
                 Some(&mut bytes_read),
                 None,
@@ -86,30 +83,29 @@ impl std::io::Read for OsPipe {
         }
         .map_err(|e| std::io::Error::from(e))?;
 
+        eprintln!("OsPipe::read: {} bytes", bytes_read);
+
         Ok(bytes_read as usize)
     }
 }
 
 impl std::io::Write for OsPipe {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        eprintln!("OsPipe::write for {:?}", self);
+        let _ = unsafe { windows::Win32::Foundation::CloseHandle(self.read_handle) }?;
+
         let mut bytes_written = 0;
-
-        let Some(write_handle) = self.write_handle else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Missing write handle",
-            ));
-        };
-
         unsafe {
             windows::Win32::Storage::FileSystem::WriteFile(
-                write_handle,
+                self.write_handle,
                 Some(buf),
                 Some(&mut bytes_written),
                 None,
             )
         }
         .map_err(|e| std::io::Error::from(e))?;
+
+        eprintln!("OsPipe::write: {} bytes", bytes_written);
 
         Ok(bytes_written as usize)
     }
@@ -128,16 +124,7 @@ impl From<windows::core::Error> for OSError {
 pub mod windows_handle_serialization {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    #[derive(Debug, Deserialize, Serialize)]
-    struct WrappedHandle(
-        #[serde(
-            deserialize_with = "deserialize_handle",
-            serialize_with = "serialize_handle"
-        )]
-        windows::Win32::Foundation::HANDLE,
-    );
-
-    pub fn deserialize_handle<'de, D>(
+    pub fn deserialize<'de, D>(
         deserializer: D,
     ) -> Result<windows::Win32::Foundation::HANDLE, D::Error>
     where
@@ -147,7 +134,7 @@ pub mod windows_handle_serialization {
         Ok(windows::Win32::Foundation::HANDLE(handle))
     }
 
-    pub fn serialize_handle<S>(
+    pub fn serialize<S>(
         handle: &windows::Win32::Foundation::HANDLE,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
@@ -155,31 +142,5 @@ pub mod windows_handle_serialization {
         S: Serializer,
     {
         handle.0.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<Option<windows::Win32::Foundation::HANDLE>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Option::<WrappedHandle>::deserialize(deserializer).map(
-            |opt_wrapped: Option<WrappedHandle>| {
-                opt_wrapped.map(|wrapped: WrappedHandle| wrapped.0)
-            },
-        )
-    }
-
-    pub fn serialize<S>(
-        handle: &Option<windows::Win32::Foundation::HANDLE>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let opt_wrapped = handle
-            .as_ref()
-            .map(|handle: &windows::Win32::Foundation::HANDLE| WrappedHandle(handle.clone()));
-        opt_wrapped.serialize(serializer)
     }
 }
