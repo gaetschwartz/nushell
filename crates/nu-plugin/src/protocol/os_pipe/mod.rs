@@ -3,7 +3,7 @@ use std::{
     thread::JoinHandle,
 };
 
-use nu_protocol::{CustomValue, PipelineData, ShellError, Span, StreamDataType, Value};
+use nu_protocol::{CustomValue, PipelineData, ShellError, Span, Spanned, StreamDataType, Value};
 use serde::{Deserialize, Serialize};
 
 pub use self::pipe_impl::OsPipe;
@@ -22,6 +22,30 @@ mod pipe_impl;
 pub struct StreamCustomValue {
     pub span: Span,
     pub os_pipe: OsPipe,
+    vec: Option<Vec<u8>>,
+}
+
+impl StreamCustomValue {
+    pub fn new(os_pipe: OsPipe, span: Span) -> Self {
+        Self {
+            span,
+            os_pipe,
+            vec: None,
+        }
+    }
+
+    pub fn read_pipe_to_end(&mut self) -> Result<&Vec<u8>, ShellError> {
+        if let None = self.vec {
+            let mut vec = Vec::new();
+            _ = self.os_pipe.clone().read_to_end(&mut vec)?;
+            self.vec = Some(vec);
+        }
+        if let Some(vec) = &self.vec {
+            Ok(vec)
+        } else {
+            unreachable!()
+        }
+    }
 }
 
 impl CustomValue for StreamCustomValue {
@@ -55,14 +79,45 @@ impl CustomValue for StreamCustomValue {
         self
     }
 
+    fn span(&self) -> Span {
+        self.span
+    }
+
     #[doc(hidden)]
     fn typetag_name(&self) -> &'static str {
-        "StreamCustomValue"
+        match self.os_pipe.datatype {
+            StreamDataType::Binary => "StreamCustomValue::Binary",
+            StreamDataType::Text => "StreamCustomValue::Text",
+        }
     }
 
     #[doc(hidden)]
     fn typetag_deserialize(&self) {
         unimplemented!("typetag_deserialize")
+    }
+
+    fn as_binary(&self) -> Result<&[u8], ShellError> {
+        let vec = self.vec.as_ref().ok_or_else(|| ShellError::CantConvert {
+            to_type: "binary".into(),
+            from_type: self.typetag_name().into(),
+            span: self.span(),
+            help: None,
+        })?;
+        Ok(vec.as_slice())
+    }
+
+    fn as_string(&self) -> Result<String, ShellError> {
+        self.as_binary()
+            .map(|b| String::from_utf8_lossy(b).to_string())
+    }
+
+    fn as_spanned_string(&self) -> Result<nu_protocol::Spanned<String>, ShellError> {
+        self.as_binary()
+            .map(|b| String::from_utf8_lossy(b).to_string())
+            .map(|s| Spanned {
+                item: s,
+                span: self.span,
+            })
     }
 }
 

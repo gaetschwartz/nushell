@@ -235,7 +235,8 @@ impl Value {
     pub fn as_bool(&self) -> Result<bool, ShellError> {
         match self {
             Value::Bool { val, .. } => Ok(*val),
-            x => Err(ShellError::CantConvert {
+            Value::CustomValue { val, .. } => val.as_bool(),
+                        x => Err(ShellError::CantConvert {
                 to_type: "boolean".into(),
                 from_type: x.get_type().to_string(),
                 span: self.span(),
