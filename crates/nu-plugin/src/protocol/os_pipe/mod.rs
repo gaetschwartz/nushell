@@ -1,6 +1,5 @@
 use std::{
     io::{Read, Write},
-    process::Command,
     thread::JoinHandle,
 };
 
@@ -189,7 +188,6 @@ impl From<std::io::Error> for OSError {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-
 pub enum Handles {
     Read,
     Write,
