@@ -236,7 +236,7 @@ impl Value {
         match self {
             Value::Bool { val, .. } => Ok(*val),
             Value::CustomValue { val, .. } => val.as_bool(),
-                        x => Err(ShellError::CantConvert {
+            x => Err(ShellError::CantConvert {
                 to_type: "boolean".into(),
                 from_type: x.get_type().to_string(),
                 span: self.span(),
@@ -336,6 +336,7 @@ impl Value {
                 }
             }),
             Value::Date { val, .. } => Ok(val.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+            Value::CustomValue { val, .. } => val.as_string(),
             x => Err(ShellError::CantConvert {
                 to_type: "string".into(),
                 from_type: x.get_type().to_string(),

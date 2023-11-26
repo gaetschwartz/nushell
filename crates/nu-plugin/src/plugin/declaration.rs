@@ -124,6 +124,9 @@ impl Command for PluginDeclaration {
         let current_envs = nu_engine::env::env_to_strings(engine_state, stack).unwrap_or_default();
         plugin_cmd.envs(current_envs);
 
+        let mut call_input = self.make_call_input(input, call)?;
+        let join_handle = OsPipe::start_pipe(&mut call_input)?;
+
         let mut child = plugin_cmd.spawn().map_err(|err| {
             let decl = engine_state.get_decl(call.decl_id);
             ShellError::GenericError(
@@ -135,13 +138,10 @@ impl Command for PluginDeclaration {
             )
         })?;
 
-        let mut call_input = self.make_call_input(input, call)?;
-        let join_handle = OsPipe::start_pipe(&mut call_input)?;
-
         let plugin_call = PluginCall::CallInfo(CallInfo {
             name: self.name.clone(),
             call: EvaluatedCall::try_from_call(call, engine_state, stack)?,
-            input: call_input,
+            input: call_input.clone(),
         });
 
         let encoding = {
@@ -155,6 +155,7 @@ impl Command for PluginDeclaration {
             };
             get_plugin_encoding(stdout_reader)?
         };
+
         let response = call_plugin(&mut child, plugin_call, &encoding, call.head).map_err(|err| {
             let decl = engine_state.get_decl(call.decl_id);
             ShellError::GenericError(
@@ -165,10 +166,6 @@ impl Command for PluginDeclaration {
                 Vec::new(),
             )
         });
-
-        if let Some(join_handle) = join_handle {
-            _ = join_handle.join();
-        }
 
         let pipeline_data = match response {
             Ok(PluginResponse::Value(value)) => {
@@ -197,6 +194,10 @@ impl Command for PluginDeclaration {
             )),
             Err(err) => Err(err),
         };
+
+        if let Some(join_handle) = join_handle {
+            _ = join_handle.join();
+        }
 
         // We need to call .wait() on the child, or we'll risk summoning the zombie horde
         let _ = child.wait();

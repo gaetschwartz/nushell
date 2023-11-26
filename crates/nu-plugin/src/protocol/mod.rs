@@ -5,12 +5,12 @@ mod plugin_data;
 
 pub use evaluated_call::EvaluatedCall;
 use nu_protocol::{PipelineData, PluginSignature, ShellError, Span, Value};
-pub use os_pipe::{OsPipe, StreamCustomValue};
+pub use os_pipe::{Handles, OsPipe, StreamCustomValue};
 pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CallInfo {
     pub name: String,
     pub call: EvaluatedCall,
@@ -24,8 +24,18 @@ pub enum CallInput {
     Pipe(OsPipe, #[serde(skip, default)] Option<PipelineData>),
 }
 
+impl Clone for CallInput {
+    fn clone(&self) -> Self {
+        match self {
+            CallInput::Value(v) => CallInput::Value(v.clone()),
+            CallInput::Data(d) => CallInput::Data(d.clone()),
+            CallInput::Pipe(p, _) => CallInput::Pipe(p.clone(), None),
+        }
+    }
+}
+
 // Information sent to the plugin
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum PluginCall {
     Signature,
     CallInfo(CallInfo),
@@ -99,6 +109,11 @@ impl From<ShellError> for LabeledError {
             ShellError::PluginFailedToDecode { msg } => LabeledError {
                 label: "Plugin failed to decode".into(),
                 msg,
+                span: None,
+            },
+            ShellError::IOError(err) => LabeledError {
+                label: "IO Error".into(),
+                msg: err.to_string(),
                 span: None,
             },
             err => LabeledError {

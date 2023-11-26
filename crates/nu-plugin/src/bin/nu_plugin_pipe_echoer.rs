@@ -9,7 +9,5 @@ fn main() {
 
     _ = deserialized.read(&mut buf).unwrap();
 
-    println!("{}", std::str::from_utf8(&buf).unwrap());
-
-    deserialized.close().unwrap();
+    eprintln!("{}", std::str::from_utf8(&buf).unwrap());
 }

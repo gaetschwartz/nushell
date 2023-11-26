@@ -55,7 +55,7 @@ pub enum PipelineData {
 
 impl PartialEq for PipelineData {
     fn eq(&self, _other: &Self) -> bool {
-        return false;
+        false
     }
 }
 
