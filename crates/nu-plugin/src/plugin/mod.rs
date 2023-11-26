@@ -331,10 +331,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                                 })
                         }
                         CallInput::Pipe(pipe, _) => Ok(Value::custom_value(
-                            Box::new(StreamCustomValue {
-                                span: call_info.call.head,
-                                os_pipe: pipe,
-                            }),
+                            Box::new(StreamCustomValue::new(pipe, call_info.call.head)),
                             call_info.call.head,
                         )),
                     };
