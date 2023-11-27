@@ -206,6 +206,7 @@ impl Iterator for StreamCustomValueIterator {
 
 impl StreamCustomValue {
     fn read_as_string(&self) -> Result<String, ShellError> {
+        self.os_pipe.close(Handle::Write)?;
         let mut vec = Vec::new();
         _ = self.clone().read_to_end(&mut vec)?;
         let string = String::from_utf8_lossy(&vec);
