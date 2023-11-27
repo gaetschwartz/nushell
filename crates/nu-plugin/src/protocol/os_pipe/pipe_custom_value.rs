@@ -1,5 +1,6 @@
-use std::io::Read;
+use std::{io::Read, process::Command};
 
+use log::trace;
 use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value};
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +24,7 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn value_string(&self) -> String {
-        eprintln!(
+        trace!(
             "{}::value_string for {:?}",
             self.typetag_name(),
             self.os_pipe
@@ -34,7 +35,7 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn to_base_value(&self, span: Span) -> Result<Value, ShellError> {
-        eprintln!(
+        trace!(
             "{}::to_base_value for {:?}",
             self.typetag_name(),
             self.os_pipe
@@ -76,7 +77,7 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn as_string(&self) -> Result<String, ShellError> {
-        eprintln!("{}::as_string for {:?}", self.typetag_name(), self.os_pipe);
+        trace!("{}::as_string for {:?}", self.typetag_name(), self.os_pipe);
 
         #[cfg(unix)]
         {
@@ -91,7 +92,7 @@ impl CustomValue for StreamCustomValue {
                 Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
                 Err(_) => "".to_string(),
             };
-            eprintln!("plugin::self: {} {:?}", pid, self_name);
+            trace!("plugin::self: {} {:?}", pid, self_name);
             let ppid = std::os::unix::process::parent_id();
             let res_parent = Command::new("ps")
                 .arg("-o")
@@ -103,18 +104,18 @@ impl CustomValue for StreamCustomValue {
                 Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
                 Err(_) => "".to_string(),
             };
-            eprintln!("plugin::parent: {} {:?}", ppid, parent_name);
+            trace!("plugin::parent: {} {:?}", ppid, parent_name);
             let open_fds = Command::new("lsof")
                 .arg("-p")
                 .arg(pid.to_string())
                 .output()
                 .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
                 .unwrap_or_else(|_| "".to_string());
-            eprintln!("plugin::open fds: \n{}", open_fds);
+            trace!("plugin::open fds: \n{}", open_fds);
             // get permissions and other info for read_fd
             let info = unsafe { libc::fcntl(self.os_pipe.read_fd, libc::F_GETFL) };
             if info < 0 {
-                eprintln!("plugin::fcntl failed: {}", std::io::Error::last_os_error());
+                trace!("plugin::fcntl failed: {}", std::io::Error::last_os_error());
             } else {
                 let acc_mode = match info & libc::O_ACCMODE {
                     libc::O_RDONLY => "read-only".to_string(),
@@ -122,11 +123,11 @@ impl CustomValue for StreamCustomValue {
                     libc::O_RDWR => "read-write".to_string(),
                     e => format!("unknown access mode {}", e),
                 };
-                eprintln!("plugin::read_fd::access mode: {}", acc_mode);
+                trace!("plugin::read_fd::access mode: {}", acc_mode);
             }
             let info = unsafe { libc::fcntl(self.os_pipe.write_fd, libc::F_GETFL) };
             if info < 0 {
-                eprintln!("plugin::fcntl failed: {}", std::io::Error::last_os_error());
+                trace!("plugin::fcntl failed: {}", std::io::Error::last_os_error());
             } else {
                 let acc_mode = match info & libc::O_ACCMODE {
                     libc::O_RDONLY => "read-only".to_string(),
@@ -134,7 +135,7 @@ impl CustomValue for StreamCustomValue {
                     libc::O_RDWR => "read-write".to_string(),
                     e => format!("unknown access mode {}", e),
                 };
-                eprintln!("plugin::write_fd::access mode: {}", acc_mode);
+                trace!("plugin::write_fd::access mode: {}", acc_mode);
             }
         }
         let vec = self.read_as_string()?;
@@ -152,7 +153,7 @@ impl CustomValue for StreamCustomValue {
 
 impl std::io::Read for StreamCustomValue {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        eprintln!("StreamCustomValue::read for {:?}", self.os_pipe);
+        trace!("StreamCustomValue::read for {:?}", self.os_pipe);
         self.os_pipe.read(buf)
     }
 }

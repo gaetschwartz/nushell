@@ -69,7 +69,7 @@ impl OsPipe {
 
 impl std::io::Read for OsPipe {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        eprintln!("OsPipe::read for {:?}", self);
+        trace!("OsPipe::read for {:?}", self);
         let _ = unsafe { windows::Win32::Foundation::CloseHandle(self.write_handle) }?;
 
         let mut bytes_read = 0;
@@ -83,7 +83,7 @@ impl std::io::Read for OsPipe {
         }
         .map_err(|e| std::io::Error::from(e))?;
 
-        eprintln!("OsPipe::read: {} bytes", bytes_read);
+        trace!("OsPipe::read: {} bytes", bytes_read);
 
         Ok(bytes_read as usize)
     }
@@ -91,7 +91,7 @@ impl std::io::Read for OsPipe {
 
 impl std::io::Write for OsPipe {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        eprintln!("OsPipe::write for {:?}", self);
+        trace!("OsPipe::write for {:?}", self);
         let _ = unsafe { windows::Win32::Foundation::CloseHandle(self.read_handle) }?;
 
         let mut bytes_written = 0;
@@ -105,7 +105,7 @@ impl std::io::Write for OsPipe {
         }
         .map_err(|e| std::io::Error::from(e))?;
 
-        eprintln!("OsPipe::write: {} bytes", bytes_written);
+        trace!("OsPipe::write: {} bytes", bytes_written);
 
         Ok(bytes_written as usize)
     }

@@ -1,8 +1,10 @@
 use std::{
     io::{Read, Write},
+    process::Command,
     thread::JoinHandle,
 };
 
+use log::trace;
 use nu_protocol::{PipelineData, ShellError, Span};
 pub use pipe_custom_value::StreamCustomValue;
 use serde::{Deserialize, Serialize};
@@ -90,7 +92,7 @@ impl OsPipe {
                                 Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
                                 Err(_) => "".to_string(),
                             };
-                            eprintln!("thread::self: {} {:?}", pid, self_name);
+                            trace!("thread::self: {} {:?}", pid, self_name);
                             let ppid = std::os::unix::process::parent_id();
                             let res_parent = Command::new("ps")
                                 .arg("-o")
@@ -102,14 +104,14 @@ impl OsPipe {
                                 Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
                                 Err(_) => "".to_string(),
                             };
-                            eprintln!("thread::parent: {} {:?}", ppid, parent_name);
+                            trace!("thread::parent: {} {:?}", ppid, parent_name);
                             let open_fds = Command::new("lsof")
                                 .arg("-p")
                                 .arg(pid.to_string())
                                 .output()
                                 .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
                                 .unwrap_or_else(|_| "".to_string());
-                            eprintln!("thread::open fds: \n{}", open_fds);
+                            trace!("thread::open fds: \n{}", open_fds);
                             // get permissions and other info for read_fd
                             let info = unsafe { libc::fcntl(os_pipe.write_fd, libc::F_GETFL) };
                             let acc_mode = match info & libc::O_ACCMODE {
@@ -118,7 +120,7 @@ impl OsPipe {
                                 libc::O_RDWR => "read-write".to_string(),
                                 e => format!("unknown access mode {}", e),
                             };
-                            eprintln!("thread::write_fd::access mode: {}", acc_mode);
+                            trace!("thread::write_fd::access mode: {}", acc_mode);
                             let info = unsafe { libc::fcntl(os_pipe.read_fd, libc::F_GETFL) };
                             let acc_mode = match info & libc::O_ACCMODE {
                                 libc::O_RDONLY => "read-only".to_string(),
@@ -126,9 +128,9 @@ impl OsPipe {
                                 libc::O_RDWR => "read-write".to_string(),
                                 e => format!("unknown access mode {}", e),
                             };
-                            eprintln!("thread::read_fd::access mode: {}", acc_mode);
+                            trace!("thread::read_fd::access mode: {}", acc_mode);
                         }
-                        eprintln!("OsPipe::start_pipe thread for {:?}", os_pipe);
+                        trace!("OsPipe::start_pipe thread for {:?}", os_pipe);
 
                         stdout.stream.for_each(|e| match e {
                             Ok(ref e) => {
@@ -136,20 +138,20 @@ impl OsPipe {
                                 match written {
                                     Ok(written) => {
                                         if written != e.len() {
-                                            eprintln!(
+                                            trace!(
                                                 "OsPipe::start_pipe thread partial write to pipe: \
                                              {} bytes written",
                                                 written
                                             );
                                         } else {
-                                            eprintln!(
+                                            trace!(
                                                 "OsPipe::start_pipe thread wrote {} bytes to pipe",
                                                 written
                                             );
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!(
+                                        trace!(
                                             "OsPipe::start_pipe thread error: failed to write to \
                                          pipe: {:?}",
                                             e
@@ -158,10 +160,10 @@ impl OsPipe {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("OsPipe::start_pipe thread error: {:?}", e);
+                                trace!("OsPipe::start_pipe thread error: {:?}", e);
                             }
                         });
-                        eprintln!("OsPipe::start_pipe thread finished writing to pipe");
+                        trace!("OsPipe::start_pipe thread finished writing to pipe");
                         let _ = os_pipe.close(Handles::write());
                         // close the pipe when the stream is finished
                     })
@@ -311,7 +313,7 @@ mod tests {
             .unwrap();
 
         if !res.status.success() {
-            eprintln!("stderr: {}", String::from_utf8_lossy(res.stderr.as_slice()));
+            trace!("stderr: {}", String::from_utf8_lossy(res.stderr.as_slice()));
             assert!(false);
         }
 
