@@ -79,7 +79,7 @@ impl CustomValue for StreamCustomValue {
     fn as_string(&self) -> Result<String, ShellError> {
         trace!("{}::as_string for {:?}", self.typetag_name(), self.os_pipe);
 
-        #[cfg(unix)]
+        #[cfg(all(unix, debug_assertions))]
         {
             let pid = std::process::id();
             let res_self = Command::new("ps")
