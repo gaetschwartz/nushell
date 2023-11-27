@@ -79,7 +79,7 @@ impl OsPipe {
                         let mut os_pipe = os_pipe;
                         let stdout = stdout;
                         os_pipe.datatype = stdout.datatype;
-                        #[cfg(unix)]
+                        #[cfg(all(unix, debug_assertions))]
                         {
                             let pid = std::process::id();
                             let res_self = Command::new("ps")
