@@ -6,6 +6,7 @@ use crate::protocol::{
 };
 use std::path::{Path, PathBuf};
 
+use log::trace;
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::{ast::Call, PluginSignature, Signature};
 use nu_protocol::{Example, PipelineData, ShellError, Value};
@@ -34,7 +35,12 @@ impl PluginDeclaration {
             stdout: Some(_), ..
         } = input
         {
-            return Ok(CallInput::Pipe(OsPipe::create(call.head)?, Some(input)));
+            match OsPipe::create(call.head) {
+                Ok(os_pipe) => return Ok(CallInput::Pipe(os_pipe, Some(input))),
+                Err(e) => {
+                    trace!("Unable to create pipe for plugin {}: {}", self.name, e);
+                }
+            }
         }
         let input = input.into_value(call.head);
         let span = input.span();

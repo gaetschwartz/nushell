@@ -13,7 +13,7 @@ pub use self::pipe_impl::OsPipe;
 
 trait OsPipeTrait: Read + Write + Send + Sync + Serialize + Deserialize<'static> {
     fn create(span: Span) -> Result<Self, PipeError>;
-    fn close(&mut self) -> Result<(), PipeError>;
+    fn close(&mut self, handle: Handle) -> Result<(), PipeError>;
 }
 
 use super::CallInput;
@@ -27,7 +27,7 @@ pub enum PipeError {
     UnexpectedInvalidPipeHandle,
     FailedToCreatePipe(OSError),
     UnsupportedPlatform,
-    FailedToClose(Vec<(Handles, OSError)>),
+    FailedToClose(Handle, OSError),
 }
 
 impl From<PipeError> for ShellError {
@@ -42,19 +42,25 @@ impl From<PipeError> for ShellError {
             PipeError::UnsupportedPlatform => {
                 ShellError::IOError("Unsupported platform for pipes".to_string())
             }
-            PipeError::FailedToClose(v) => {
-                let mut s = String::from("Failed to close pipe");
-                if v.len() > 1 {
-                    s.push('s');
-                }
-                s.push_str(": ");
-                s.push_str(
-                    &v.iter()
-                        .map(|(h, e)| format!("{} ({})", h, e.0))
-                        .collect::<Vec<String>>()
-                        .join(", "),
-                );
-                ShellError::IOError(s)
+            PipeError::FailedToClose(v, e) => {
+                ShellError::IOError(format!("Failed to close pipe handle {:?}: {}", v, e.0))
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for PipeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PipeError::UnexpectedInvalidPipeHandle => {
+                write!(f, "Unexpected invalid pipe handle")
+            }
+            PipeError::FailedToCreatePipe(error) => {
+                write!(f, "Failed to create pipe: {}", error.0)
+            }
+            PipeError::UnsupportedPlatform => write!(f, "Unsupported platform for pipes"),
+            PipeError::FailedToClose(v, e) => {
+                write!(f, "Failed to close pipe handle {:?}: {}", v, e.0)
             }
         }
     }
@@ -164,7 +170,7 @@ impl OsPipe {
                             }
                         });
                         trace!("OsPipe::start_pipe thread finished writing to pipe");
-                        let _ = os_pipe.close(Handles::write());
+                        let _ = os_pipe.close(Handle::Write);
                         // close the pipe when the stream is finished
                     })
                 };
@@ -190,36 +196,17 @@ impl From<std::io::Error> for OSError {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Handles {
+pub enum Handle {
     Read,
     Write,
 }
 
-impl Handles {
-    pub fn all() -> Vec<Handles> {
-        vec![Handles::Read, Handles::Write]
-    }
 
-    pub fn read() -> Vec<Handles> {
-        vec![Handles::Read]
-    }
-
-    pub fn write() -> Vec<Handles> {
-        vec![Handles::Write]
-    }
-}
-
-impl From<Handles> for Vec<Handles> {
-    fn from(val: Handles) -> Self {
-        vec![val]
-    }
-}
-
-impl std::fmt::Display for Handles {
+impl std::fmt::Display for Handle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Handles::Read => write!(f, "read"),
-            Handles::Write => write!(f, "write"),
+            Handle::Read => write!(f, "read"),
+            Handle::Write => write!(f, "write"),
         }
     }
 }

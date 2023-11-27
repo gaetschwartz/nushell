@@ -4,7 +4,7 @@ use log::trace;
 use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value};
 use serde::{Deserialize, Serialize};
 
-use crate::{Handles, OsPipe};
+use crate::{Handle, OsPipe};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct StreamCustomValue {
@@ -139,7 +139,7 @@ impl CustomValue for StreamCustomValue {
             }
         }
         let vec = self.read_as_string()?;
-        self.os_pipe.close(Handles::read())?;
+        self.os_pipe.close(Handle::Read)?;
         Ok(vec)
     }
 
