@@ -1,3 +1,4 @@
+use log::trace;
 use nu_protocol::{Span, StreamDataType};
 use serde::{Deserialize, Serialize};
 
@@ -71,14 +72,14 @@ impl std::io::Read for OsPipe {
         // if result < 0 {
         //     return Err(std::io::Error::last_os_error());
         // }
-        eprintln!("OsPipe::reading for {:?}", self.read_fd);
+        trace!("OsPipe::reading for {:?}", self.read_fd);
 
         let result = unsafe { libc::read(self.read_fd, buf.as_mut_ptr() as *mut _, buf.len()) };
         if result < 0 {
             return Err(std::io::Error::last_os_error());
         }
 
-        eprintln!("OsPipe::read {} bytes", result);
+        trace!("OsPipe::read {} bytes", result);
 
         Ok(result as usize)
     }
