@@ -57,7 +57,7 @@ impl OsPipe {
 impl std::io::Read for OsPipe {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         // close write end of pipe
-        let _ = unsafe { libc::close(self.write_fd) };
+        // let _ = unsafe { libc::close(self.write_fd) };
         // if result < 0 {
         //     return Err(std::io::Error::last_os_error());
         // }
@@ -80,7 +80,7 @@ impl std::io::Write for OsPipe {
 
         // https://stackoverflow.com/a/24099738
         // fifo is blocking
-        let _ = unsafe { libc::close(self.read_fd) };
+        // let _ = unsafe { libc::close(self.read_fd) };
         // if result < 0 {
         //     return Err(std::io::Error::last_os_error());
         // }

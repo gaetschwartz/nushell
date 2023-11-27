@@ -138,6 +138,8 @@ impl OsPipe {
                         }
                         trace!("OsPipe::start_pipe thread for {:?}", os_pipe);
 
+                        let _ = os_pipe.close(Handle::Read);
+
                         stdout.stream.for_each(|e| match e {
                             Ok(ref e) => {
                                 let written = os_pipe.write(e.as_slice());
@@ -200,7 +202,6 @@ pub enum Handle {
     Read,
     Write,
 }
-
 
 impl std::fmt::Display for Handle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
