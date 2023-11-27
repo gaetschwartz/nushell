@@ -2,9 +2,7 @@ use log::trace;
 use nu_protocol::{Span, StreamDataType};
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::os_pipe::OSError;
-
-use super::{Handles, PipeError};
+use super::{Handle, PipeError};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct OsPipe {
@@ -35,30 +33,21 @@ impl OsPipe {
         })
     }
 
-    pub fn close(&self, handles: Vec<Handles>) -> Result<(), PipeError> {
+    pub fn close(&self, handle: Handle) -> Result<(), PipeError> {
         use libc::close;
 
-        fn close_with_error(handle: Handles, fd: libc::c_int) -> (Handles, i32, Option<OSError>) {
-            let result = unsafe { close(fd) };
-            let error = if result < 0 {
-                Some(std::io::Error::last_os_error().into())
-            } else {
-                None
-            };
-            (handle, result, error)
-        }
+        let fd = match handle {
+            Handle::Read => self.read_fd,
+            Handle::Write => self.write_fd,
+        };
 
-        let results = handles.into_iter().map(|h| match h {
-            Handles::Read => close_with_error(h, self.read_fd),
-            Handles::Write => close_with_error(h, self.write_fd),
-        });
-        let errored = results
-            .filter(|(_, _, e)| e.is_some())
-            .map(|(h, _, e)| (h, e.unwrap()))
-            .collect::<Vec<_>>();
+        let res = unsafe { close(fd) };
 
-        if !errored.is_empty() {
-            return Err(PipeError::FailedToClose(errored));
+        if res < 0 {
+            return Err(PipeError::FailedToClose(
+                handle,
+                std::io::Error::last_os_error().into(),
+            ));
         }
 
         Ok(())
