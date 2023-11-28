@@ -75,8 +75,7 @@ impl OsPipe {
             CallInput::Pipe(os_pipe, Some(PipelineData::ExternalStream { stdout, .. })) => {
                 let handle = {
                     // unsafely move the stdout stream to the new thread by casting to a void pointer
-                    let stdout = stdout.take();
-                    let Some(stdout) = stdout else {
+                    let Some(stdout) = stdout.take() else {
                         return Ok(None);
                     };
                     let os_pipe = os_pipe.clone();
@@ -140,9 +139,11 @@ impl OsPipe {
 
                         let _ = os_pipe.close(Handle::Read);
 
+                        let mut writer = std::io::BufWriter::new(os_pipe.clone());
+
                         stdout.stream.for_each(|e| match e {
                             Ok(ref e) => {
-                                let written = os_pipe.write(e.as_slice());
+                                let written = writer.write(e);
                                 match written {
                                     Ok(written) => {
                                         if written != e.len() {
@@ -172,6 +173,7 @@ impl OsPipe {
                             }
                         });
                         trace!("OsPipe::start_pipe thread finished writing to pipe");
+                        let _ = writer.flush();
                         let _ = os_pipe.close(Handle::Write);
                         // close the pipe when the stream is finished
                     })
