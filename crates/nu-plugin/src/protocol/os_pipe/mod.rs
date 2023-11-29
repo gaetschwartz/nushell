@@ -1,19 +1,11 @@
 #[cfg(unix)]
 use std::process::Command;
-use std::{
-    io::{Read, Write},
-    thread::JoinHandle,
-};
+use std::{io::Write, thread::JoinHandle};
 
 use log::trace;
 use nu_protocol::{PipelineData, ShellError, Span, StreamDataType};
 pub use pipe_custom_value::StreamCustomValue;
 use serde::{Deserialize, Serialize};
-
-trait OsPipeTrait: Read + Write + Send + Sync + Serialize + Deserialize<'static> {
-    fn create(span: Span) -> Result<Self, PipeError>;
-    fn close(&mut self, handle: Handle) -> Result<(), PipeError>;
-}
 
 use super::CallInput;
 mod pipe_custom_value;
@@ -56,15 +48,18 @@ impl Handle {
     }
 
     #[allow(non_snake_case)]
+    #[inline(always)]
     fn Read(handle: InnerHandleType) -> Handle {
         Handle(handle, HandleTypeEnum::Read)
     }
 
     #[allow(non_snake_case)]
+    #[inline(always)]
     fn Write(handle: InnerHandleType) -> Handle {
         Handle(handle, HandleTypeEnum::Write)
     }
 
+    #[inline(always)]
     fn native(&self) -> InnerHandleType {
         self.0
     }
@@ -356,124 +351,126 @@ impl OsPipe {
     pub fn start_pipe(input: &mut CallInput) -> Result<Option<JoinHandle<()>>, ShellError> {
         match input {
             CallInput::Pipe(os_pipe, Some(PipelineData::ExternalStream { stdout, .. })) => {
-                let handle = {
-                    // unsafely move the stdout stream to the new thread by casting to a void pointer
-                    let Some(stdout) = stdout.take() else {
-                        return Ok(None);
-                    };
-                    let os_pipe = os_pipe.clone();
+                let time0 = std::time::Instant::now();
+                let Some(stdout) = stdout.take() else {
+                    return Ok(None);
+                };
+                let os_pipe = os_pipe.clone();
+                let handle = std::thread::spawn(move || {
+                    let mut os_pipe = os_pipe;
+                    let stdout = stdout;
+                    os_pipe.datatype = stdout.datatype;
+                    #[cfg(all(unix, debug_assertions))]
+                    {
+                        let pid = std::process::id();
+                        let res_self = Command::new("ps")
+                            .arg("-o")
+                            .arg("comm=")
+                            .arg("-p")
+                            .arg(pid.to_string())
+                            .output();
+                        let self_name = match res_self {
+                            Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
+                            Err(_) => "".to_string(),
+                        };
+                        trace!("thread::self: {} {:?}", pid, self_name);
+                        let ppid = std::os::unix::process::parent_id();
+                        let res_parent = Command::new("ps")
+                            .arg("-o")
+                            .arg("comm=")
+                            .arg("-p")
+                            .arg(ppid.to_string())
+                            .output();
+                        let parent_name = match res_parent {
+                            Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
+                            Err(_) => "".to_string(),
+                        };
+                        trace!("thread::parent: {} {:?}", ppid, parent_name);
+                        let open_fds = Command::new("lsof")
+                            .arg("-p")
+                            .arg(pid.to_string())
+                            .output()
+                            .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+                            .unwrap_or_else(|_| "".to_string());
+                        trace!("thread::open fds: \n{}", open_fds);
+                        // get permissions and other info for read_fd
+                        let info =
+                            unsafe { libc::fcntl(os_pipe.write_handle.into(), libc::F_GETFL) };
+                        let acc_mode = match info & libc::O_ACCMODE {
+                            libc::O_RDONLY => "read-only".to_string(),
+                            libc::O_WRONLY => "write-only".to_string(),
+                            libc::O_RDWR => "read-write".to_string(),
+                            e => format!("unknown access mode {}", e),
+                        };
+                        trace!("thread::write_fd::access mode: {}", acc_mode);
+                        let info =
+                            unsafe { libc::fcntl(os_pipe.read_handle.into(), libc::F_GETFL) };
+                        let acc_mode = match info & libc::O_ACCMODE {
+                            libc::O_RDONLY => "read-only".to_string(),
+                            libc::O_WRONLY => "write-only".to_string(),
+                            libc::O_RDWR => "read-write".to_string(),
+                            e => format!("unknown access mode {}", e),
+                        };
+                        trace!("thread::read_fd::access mode: {}", acc_mode);
+                    }
+                    trace!("OsPipe::start_pipe thread for {:?}", os_pipe);
 
-                    std::thread::spawn(move || {
-                        let mut os_pipe = os_pipe;
-                        let stdout = stdout;
-                        os_pipe.datatype = stdout.datatype;
-                        #[cfg(all(unix, debug_assertions))]
-                        {
-                            let pid = std::process::id();
-                            let res_self = Command::new("ps")
-                                .arg("-o")
-                                .arg("comm=")
-                                .arg("-p")
-                                .arg(pid.to_string())
-                                .output();
-                            let self_name = match res_self {
-                                Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
-                                Err(_) => "".to_string(),
-                            };
-                            trace!("thread::self: {} {:?}", pid, self_name);
-                            let ppid = std::os::unix::process::parent_id();
-                            let res_parent = Command::new("ps")
-                                .arg("-o")
-                                .arg("comm=")
-                                .arg("-p")
-                                .arg(ppid.to_string())
-                                .output();
-                            let parent_name = match res_parent {
-                                Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
-                                Err(_) => "".to_string(),
-                            };
-                            trace!("thread::parent: {} {:?}", ppid, parent_name);
-                            let open_fds = Command::new("lsof")
-                                .arg("-p")
-                                .arg(pid.to_string())
-                                .output()
-                                .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
-                                .unwrap_or_else(|_| "".to_string());
-                            trace!("thread::open fds: \n{}", open_fds);
-                            // get permissions and other info for read_fd
-                            let info =
-                                unsafe { libc::fcntl(os_pipe.write_handle.into(), libc::F_GETFL) };
-                            let acc_mode = match info & libc::O_ACCMODE {
-                                libc::O_RDONLY => "read-only".to_string(),
-                                libc::O_WRONLY => "write-only".to_string(),
-                                libc::O_RDWR => "read-write".to_string(),
-                                e => format!("unknown access mode {}", e),
-                            };
-                            trace!("thread::write_fd::access mode: {}", acc_mode);
-                            let info =
-                                unsafe { libc::fcntl(os_pipe.read_handle.into(), libc::F_GETFL) };
-                            let acc_mode = match info & libc::O_ACCMODE {
-                                libc::O_RDONLY => "read-only".to_string(),
-                                libc::O_WRONLY => "write-only".to_string(),
-                                libc::O_RDWR => "read-write".to_string(),
-                                e => format!("unknown access mode {}", e),
-                            };
-                            trace!("thread::read_fd::access mode: {}", acc_mode);
-                        }
-                        trace!("OsPipe::start_pipe thread for {:?}", os_pipe);
+                    // let _ = os_pipe.close_read();
 
-                        let _ = os_pipe.close_read();
+                    let mut writer = os_pipe.unbuffered_writer();
 
-                        let mut writer = os_pipe.unbuffered_writer();
-
-                        stdout.stream.for_each(|e| match e {
-                            Ok(ref e) => {
-                                let written = writer.write(e);
-                                match written {
-                                    Ok(written) => {
-                                        if written != e.len() {
-                                            trace!(
-                                                "OsPipe::start_pipe thread partial write to pipe: \
-                                             {} bytes written",
-                                                written
-                                            );
-                                        } else {
-                                            trace!(
-                                                "OsPipe::start_pipe thread wrote {} bytes to pipe",
-                                                written
-                                            );
-                                        }
-                                    }
-                                    Err(e) => {
+                    stdout.stream.for_each(|e| match e {
+                        Ok(ref e) => {
+                            let written = writer.write(e);
+                            match written {
+                                Ok(written) => {
+                                    if written != e.len() {
                                         trace!(
-                                            "OsPipe::start_pipe thread error: failed to write to \
-                                         pipe: {:?}",
-                                            e
+                                            "OsPipe::start_pipe thread partial write to pipe: \
+                                             {} bytes written",
+                                            written
+                                        );
+                                    } else {
+                                        trace!(
+                                            "OsPipe::start_pipe thread wrote {} bytes to pipe",
+                                            written
                                         );
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                trace!("OsPipe::start_pipe thread error: {:?}", e);
-                            }
-                        });
-                        match writer.flush() {
-                            Ok(_) => {
-                                trace!("OsPipe::start_pipe thread flushed pipe");
-                            }
-                            Err(e) => {
-                                trace!(
-                                    "OsPipe::start_pipe thread error: failed to flush pipe: {:?}",
-                                    e
-                                );
+                                Err(e) => {
+                                    trace!(
+                                        "OsPipe::start_pipe thread error: failed to write to \
+                                         pipe: {:?}",
+                                        e
+                                    );
+                                }
                             }
                         }
+                        Err(e) => {
+                            trace!("OsPipe::start_pipe thread error: {:?}", e);
+                        }
+                    });
+                    match writer.flush() {
+                        Ok(_) => {
+                            trace!("OsPipe::start_pipe thread flushed pipe");
+                        }
+                        Err(e) => {
+                            trace!(
+                                "OsPipe::start_pipe thread error: failed to flush pipe: {:?}",
+                                e
+                            );
+                        }
+                    }
 
-                        trace!("OsPipe::start_pipe thread finished writing, closing pipe");
-                        let _ = os_pipe.close_write();
-                        // close the pipe when the stream is finished
-                    })
-                };
+                    trace!("OsPipe::start_pipe thread finished writing, closing pipe");
+                    let _ = os_pipe.close_write();
+                    // close the pipe when the stream is finished
+                });
+
+                println!(
+                    "OsPipe::start_pipe thread started in {} ms",
+                    time0.elapsed().as_micros() as f64 / 1000.0
+                );
 
                 Ok(Some(handle))
             }
@@ -513,6 +510,8 @@ impl std::fmt::Display for Handle {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use super::*;
 
     #[test]
@@ -526,13 +525,13 @@ mod tests {
 
         assert_eq!(written, 11);
 
-        let mut buf = [0u8; 11];
+        let mut buf = [0u8; 256];
 
         let read = reader.read(&mut buf).unwrap();
         pipe.close_read().unwrap();
 
         assert_eq!(read, 11);
-        assert_eq!(buf, "hello world".as_bytes());
+        assert_eq!(&buf[..read], "hello world".as_bytes());
     }
 
     #[test]

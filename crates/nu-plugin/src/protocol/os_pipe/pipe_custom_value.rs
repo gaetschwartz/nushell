@@ -74,7 +74,7 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn as_string(&self) -> Result<String, ShellError> {
-        trace!("{}::as_string for {:?}", self.typetag_name(), self.os_pipe);
+        // trace!("{}::as_string for {:?}", self.typetag_name(), self.os_pipe);
 
         #[cfg(all(unix, debug_assertions))]
         {
@@ -135,11 +135,20 @@ impl CustomValue for StreamCustomValue {
                 trace!("plugin::write_fd::access mode: {}", acc_mode);
             }
         }
-        self.os_pipe.close_write()?;
+        // self.os_pipe.close_write()?;
         let mut reader = self.os_pipe.reader();
         let mut vec = Vec::new();
+        let time0 = std::time::Instant::now();
         _ = reader.read_to_end(&mut vec)?;
+        let time1 = std::time::Instant::now();
         let string = String::from_utf8_lossy(&vec);
+        let time2 = std::time::Instant::now();
+        eprintln!(
+            "plugin::as_string: {} bytes, read: {} ms, decode: {} ms",
+            vec.len(),
+            (time1 - time0).as_micros() as f64 / 1000.0,
+            (time2 - time1).as_micros() as f64 / 1000.0
+        );
         self.os_pipe.close_read()?;
         Ok(string.to_string())
     }
