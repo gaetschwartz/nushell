@@ -5,11 +5,9 @@ use std::{
 };
 
 use log::trace;
-use nu_protocol::{PipelineData, ShellError, Span};
+use nu_protocol::{PipelineData, ShellError, Span, StreamDataType};
 pub use pipe_custom_value::StreamCustomValue;
 use serde::{Deserialize, Serialize};
-
-pub use self::pipe_impl::OsPipe;
 
 trait OsPipeTrait: Read + Write + Send + Sync + Serialize + Deserialize<'static> {
     fn create(span: Span) -> Result<Self, PipeError>;
@@ -28,6 +26,226 @@ pub enum PipeError {
     FailedToCreatePipe(OSError),
     UnsupportedPlatform,
     FailedToClose(Handle, OSError),
+}
+
+#[cfg(windows)]
+type InnerHandleType = windows::core::Handle;
+#[cfg(unix)]
+type InnerHandleType = libc::c_int;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum HandleTypeEnum {
+    Read,
+    Write,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Handle(pub(crate) InnerHandleType, HandleTypeEnum);
+
+impl Handle {
+    pub fn close(self) -> Result<(), PipeError> {
+        pipe_impl::close_handle(self)
+    }
+
+    #[allow(non_snake_case)]
+    fn Read(fds: i32) -> Handle {
+        Handle(fds, HandleTypeEnum::Read)
+    }
+
+    #[allow(non_snake_case)]
+    fn Write(fds: i32) -> Handle {
+        Handle(fds, HandleTypeEnum::Write)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct OsPipe {
+    pub span: Span,
+    pub datatype: StreamDataType,
+
+    read_handle: Handle,
+    write_handle: Handle,
+}
+
+impl OsPipe {
+    /// Creates a new pipe. Pipes are unidirectional streams of bytes composed of a read end and a write end. They can be used for interprocess communication.
+    /// Uses `pipe(2)` on unix and `CreatePipe` on windows.
+    #[inline(always)]
+    pub fn create(span: Span) -> Result<Self, PipeError> {
+        pipe_impl::create_pipe(span)
+    }
+
+    /// Closes the write end of the pipe. This is needed to signal the end of the stream to the reader.
+    #[inline(always)]
+    pub fn close_write(&self) -> Result<(), PipeError> {
+        pipe_impl::close_handle(self.write_handle)
+    }
+
+    /// Closes the read end of the pipe. This is needed to signal we are done reading from the pipe.
+    #[inline(always)]
+    pub fn close_read(&self) -> Result<(), PipeError> {
+        pipe_impl::close_handle(self.read_handle)
+    }
+
+    /// Returns a `HandleReader` for reading from the pipe.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::protocol::os_pipe::HandleReader;
+    ///
+    /// let pipe = /* create an instance of the pipe */;
+    /// let reader = pipe.reader();
+    /// // Use the reader to read from the pipe
+    /// ```
+    #[inline(always)]
+    pub fn reader(&self) -> HandleReader {
+        assert!(self.read_handle.1 == HandleTypeEnum::Read);
+        HandleReader(self.read_handle)
+    }
+
+    /// Returns a buffered handle writer for the pipe. Prefer this over `unbuffered_writer` for better performance.
+    ///
+    /// ### Closing
+    /// It is crucial to call `writer.close()` on the writer when you are done with it.
+    /// Otherwise the buffered writer will not flush the buffer to the pipe and the reader will hang waiting for more data.
+    ///
+    /// If you do not want to close the handle but still want to flush the buffer, you can call `writer.flush()` instead.
+    #[inline(always)]
+    pub fn writer(&self) -> BufferedHandleWriter {
+        assert!(self.write_handle.1 == HandleTypeEnum::Write);
+        BufferedHandleWriter::new(self.write_handle)
+    }
+
+    /// Returns an unbuffered writer for the pipe. Prefer `writer` over this for better performance.
+    ///
+    /// ### Closing
+    /// It is crucial to call `writer.close()` on the writer when you are done with it to signal the end of the stream to the reader.
+    /// Failing to do so will cause the reader to hang waiting for more data.
+    #[inline(always)]
+    pub fn unbuffered_writer(&self) -> UnbufferedHandleWriter {
+        assert!(self.write_handle.1 == HandleTypeEnum::Write);
+        UnbufferedHandleWriter(self.write_handle)
+    }
+
+    /// Returns a tuple containing a `HandleReader` and a `BufferedHandleWriter`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use crate::protocol::os_pipe::HandleReader;
+    /// use crate::protocol::os_pipe::BufferedHandleWriter;
+    ///
+    /// let (reader, writer) = rw();
+    /// ```
+    #[inline(always)]
+    pub fn rw(&self) -> (HandleReader, BufferedHandleWriter) {
+        (self.reader(), self.writer())
+    }
+
+    /// Returns a tuple containing a `HandleReader` and an `UnbufferedHandleWriter`. Prefer `rw` over this for better performance.
+    #[inline(always)]
+    pub fn urw(&self) -> (HandleReader, UnbufferedHandleWriter) {
+        (self.reader(), self.unbuffered_writer())
+    }
+}
+
+impl From<Handle> for InnerHandleType {
+    fn from(val: Handle) -> Self {
+        val.0
+    }
+}
+
+/// A struct representing a buffered handle writer. Prefer this over `UnbufferedHandleWriter` for better performance.
+#[derive(Debug)]
+pub struct BufferedHandleWriter {
+    handle: Handle,
+    writer: std::io::BufWriter<UnbufferedHandleWriter>,
+}
+
+impl BufferedHandleWriter {
+    fn new(handle: Handle) -> Self {
+        Self {
+            handle,
+            writer: std::io::BufWriter::new(UnbufferedHandleWriter(handle)),
+        }
+    }
+}
+
+/// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[repr(transparent)]
+pub struct UnbufferedHandleWriter(Handle);
+
+pub trait HasHandle {
+    /// Returns the handle of the object.
+    fn handle(&self) -> Handle;
+
+    /// Closes the handle of the object.
+    #[inline(always)]
+    fn close(&mut self) -> Result<(), PipeError> {
+        self.handle().close()
+    }
+}
+
+impl HasHandle for HandleReader {
+    fn handle(&self) -> Handle {
+        self.0
+    }
+}
+
+impl HasHandle for BufferedHandleWriter {
+    fn handle(&self) -> Handle {
+        self.handle
+    }
+
+    fn close(&mut self) -> Result<(), PipeError> {
+        self.writer
+            .flush()
+            .map_err(|e| PipeError::FailedToClose(self.handle, e.into()))?;
+        self.handle.close()
+    }
+}
+
+impl HasHandle for UnbufferedHandleWriter {
+    fn handle(&self) -> Handle {
+        self.0
+    }
+}
+
+impl std::io::Write for UnbufferedHandleWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        pipe_impl::write_handle(self.0, buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl std::io::Write for BufferedHandleWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.writer.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+/// A struct representing a handle reader.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HandleReader(Handle);
+
+impl std::io::Read for HandleReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        pipe_impl::read_handle(self.0, buf)
+    }
+}
+
+impl UnbufferedHandleWriter {
+    pub fn buffered(self) -> BufferedHandleWriter {
+        BufferedHandleWriter::new(self.0)
+    }
 }
 
 impl From<PipeError> for ShellError {
@@ -118,7 +336,8 @@ impl OsPipe {
                                 .unwrap_or_else(|_| "".to_string());
                             trace!("thread::open fds: \n{}", open_fds);
                             // get permissions and other info for read_fd
-                            let info = unsafe { libc::fcntl(os_pipe.write_fd, libc::F_GETFL) };
+                            let info =
+                                unsafe { libc::fcntl(os_pipe.write_handle.into(), libc::F_GETFL) };
                             let acc_mode = match info & libc::O_ACCMODE {
                                 libc::O_RDONLY => "read-only".to_string(),
                                 libc::O_WRONLY => "write-only".to_string(),
@@ -126,7 +345,8 @@ impl OsPipe {
                                 e => format!("unknown access mode {}", e),
                             };
                             trace!("thread::write_fd::access mode: {}", acc_mode);
-                            let info = unsafe { libc::fcntl(os_pipe.read_fd, libc::F_GETFL) };
+                            let info =
+                                unsafe { libc::fcntl(os_pipe.read_handle.into(), libc::F_GETFL) };
                             let acc_mode = match info & libc::O_ACCMODE {
                                 libc::O_RDONLY => "read-only".to_string(),
                                 libc::O_WRONLY => "write-only".to_string(),
@@ -137,9 +357,9 @@ impl OsPipe {
                         }
                         trace!("OsPipe::start_pipe thread for {:?}", os_pipe);
 
-                        let _ = os_pipe.close(Handle::Read);
+                        let _ = os_pipe.close_read();
 
-                        let mut writer = std::io::BufWriter::new(os_pipe.clone());
+                        let mut writer = os_pipe.writer();
 
                         stdout.stream.for_each(|e| match e {
                             Ok(ref e) => {
@@ -174,7 +394,7 @@ impl OsPipe {
                         });
                         trace!("OsPipe::start_pipe thread finished writing to pipe");
                         let _ = writer.flush();
-                        let _ = os_pipe.close(Handle::Write);
+                        let _ = os_pipe.close_write();
                         // close the pipe when the stream is finished
                     })
                 };
@@ -199,38 +419,31 @@ impl From<std::io::Error> for OSError {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Handle {
-    Read,
-    Write,
-}
-
 impl std::fmt::Display for Handle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Handle::Read => write!(f, "read"),
-            Handle::Write => write!(f, "write"),
-        }
+        write!(f, "{:?} ({})", self.1, self.0)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
 
     use super::*;
 
     #[test]
     fn test_pipe() {
-        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        let pipe = OsPipe::create(Span::unknown()).unwrap();
+        let (mut reader, mut writer) = pipe.urw();
         // write hello world to the pipe
-        let written = pipe.write("hello world".as_bytes()).unwrap();
+        let written = writer.write("hello world".as_bytes()).unwrap();
+        pipe.close_write().unwrap();
 
         assert_eq!(written, 11);
 
         let mut buf = [0u8; 11];
 
-        let read = pipe.read(&mut buf).unwrap();
+        let read = reader.read(&mut buf).unwrap();
+        pipe.close_read().unwrap();
 
         assert_eq!(read, 11);
         assert_eq!(buf, "hello world".as_bytes());
@@ -238,57 +451,68 @@ mod tests {
 
     #[test]
     fn test_serialized_pipe() {
-        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        let pipe = OsPipe::create(Span::unknown()).unwrap();
+        let mut writer = pipe.unbuffered_writer();
         // write hello world to the pipe
-        let written = pipe.write("hello world".as_bytes()).unwrap();
+        let written = writer.write("hello world".as_bytes()).unwrap();
 
         assert_eq!(written, 11);
+
+        writer.close().unwrap();
 
         // serialize the pipe
         let serialized = serde_json::to_string(&pipe).unwrap();
         println!("{}", serialized);
         // deserialize the pipe
-        let mut deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
+        let deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
+        let mut reader = deserialized.reader();
 
         let mut buf = [0u8; 11];
 
-        let read = deserialized.read(&mut buf).unwrap();
+        let read = reader.read(&mut buf).unwrap();
 
         assert_eq!(read, 11);
         assert_eq!(buf, "hello world".as_bytes());
+        reader.close().unwrap();
     }
 
     #[test]
     fn test_pipe_in_another_thread() {
-        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        let pipe = OsPipe::create(Span::unknown()).unwrap();
+        let mut writer = pipe.unbuffered_writer();
         // write hello world to the pipe
-        let written = pipe.write("hello world".as_bytes()).unwrap();
+        let written = writer.write("hello world".as_bytes()).unwrap();
 
         assert_eq!(written, 11);
+        writer.close().unwrap();
 
         // serialize the pipe
         let serialized = serde_json::to_string(&pipe).unwrap();
         // spawn a new process
         std::thread::spawn(move || {
             // deserialize the pipe
-            let mut deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
+            let deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
+            let mut reader = deserialized.reader();
 
             let mut buf = [0u8; 11];
 
-            let read = deserialized.read(&mut buf).unwrap();
+            let read = reader.read(&mut buf).unwrap();
 
             assert_eq!(read, 11);
             assert_eq!(buf, "hello world".as_bytes());
+            reader.close().unwrap();
         });
     }
 
     #[test]
     fn test_pipe_in_another_process() {
-        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        let pipe = OsPipe::create(Span::unknown()).unwrap();
+        let mut writer = pipe.unbuffered_writer();
         // write hello world to the pipe
-        let written = pipe.write("hello world".as_bytes()).unwrap();
+        let written = writer.write("hello world".as_bytes()).unwrap();
 
         assert_eq!(written, 11);
+        writer.close().unwrap();
 
         // serialize the pipe
         let serialized = serde_json::to_string(&pipe).unwrap();
@@ -307,7 +531,7 @@ mod tests {
             assert!(false);
         }
 
-        assert_eq!(res.status.success(), true);
+        assert!(res.status.success());
         assert_eq!(
             String::from_utf8_lossy(res.stderr.as_slice()),
             "hello world\n"
