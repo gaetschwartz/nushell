@@ -24,6 +24,7 @@ pub enum PipeError {
     FailedSetNamedPipeHandleState(Handle, OSError),
 }
 
+#[allow(dead_code)]
 type PipeResult<T> = Result<T, PipeError>;
 
 #[cfg(windows)]
@@ -72,6 +73,15 @@ pub struct OsPipe {
 
     read_handle: Handle,
     write_handle: Handle,
+
+    handle_policy: HandlePolicy,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub enum HandlePolicy {
+    CloseOtherEndBeforeOperation,
+    #[serde(rename = "manual")]
+    ManuallyCloseAllHandles,
 }
 
 impl OsPipe {
@@ -107,6 +117,9 @@ impl OsPipe {
     #[inline(always)]
     pub fn reader(&self) -> HandleReader {
         assert!(self.read_handle.1 == HandleTypeEnum::Read);
+        if self.handle_policy == HandlePolicy::CloseOtherEndBeforeOperation {
+            let _ = self.close_write();
+        }
         HandleReader(self.read_handle)
     }
 
@@ -120,6 +133,9 @@ impl OsPipe {
     #[inline(always)]
     pub fn writer(&self) -> BufferedHandleWriter {
         assert!(self.write_handle.1 == HandleTypeEnum::Write);
+        if self.handle_policy == HandlePolicy::CloseOtherEndBeforeOperation {
+            let _ = self.close_read();
+        }
         BufferedHandleWriter::new(self.write_handle)
     }
 
@@ -278,6 +294,7 @@ impl std::io::Write for BufferedHandleWriter {
 pub struct HandleReader(Handle);
 
 impl std::io::Read for HandleReader {
+    #[allow(clippy::useless_conversion)]
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         pipe_impl::read_handle(self.0, buf).map_err(|e| e.into())
     }
