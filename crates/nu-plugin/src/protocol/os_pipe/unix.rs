@@ -21,13 +21,14 @@ pub fn create_pipe(span: Span) -> Result<OsPipe, PipeError> {
         read_handle: Handle::Read(fds[0]),
         write_handle: Handle::Write(fds[1]),
         datatype: StreamDataType::Binary,
+        handle_policy: super::HandlePolicy::CloseOtherEndBeforeOperation,
     })
 }
 
 pub fn close_handle(handle: Handle) -> Result<(), PipeError> {
     use libc::close;
 
-    let res = unsafe { close(handle.into()) };
+    let res = unsafe { close(handle.native()) };
 
     if res < 0 {
         return Err(PipeError::FailedToCloseHandle(
@@ -47,7 +48,7 @@ pub fn read_handle(handle: Handle, buf: &mut [u8]) -> std::io::Result<usize> {
     // }
     trace!("OsPipe::reading for {:?}", handle);
 
-    let result = unsafe { libc::read(handle.into(), buf.as_mut_ptr() as *mut _, buf.len()) };
+    let result = unsafe { libc::read(handle.native(), buf.as_mut_ptr() as *mut _, buf.len()) };
     if result < 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -67,7 +68,7 @@ pub fn write_handle(handle: Handle, buf: &[u8]) -> std::io::Result<usize> {
     //     return Err(std::io::Error::last_os_error());
     // }
 
-    let result = unsafe { write(handle.into(), buf.as_ptr() as *const _, buf.len()) };
+    let result = unsafe { write(handle.native(), buf.as_ptr() as *const _, buf.len()) };
     if result < 0 {
         return Err(std::io::Error::last_os_error());
     }
