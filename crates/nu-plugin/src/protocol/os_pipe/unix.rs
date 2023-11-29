@@ -30,7 +30,7 @@ pub fn close_handle(handle: Handle) -> Result<(), PipeError> {
     let res = unsafe { close(handle.into()) };
 
     if res < 0 {
-        return Err(PipeError::FailedToClose(
+        return Err(PipeError::FailedToCloseHandle(
             handle,
             std::io::Error::last_os_error().into(),
         ));

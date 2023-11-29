@@ -10,5 +10,5 @@ fn main() {
 
     _ = reader.read(&mut buf).unwrap();
 
-    eprintln!("{}", std::str::from_utf8(&buf).unwrap());
+    println!("{}", std::str::from_utf8(&buf).unwrap());
 }
