@@ -4,18 +4,20 @@ use std::{io, ptr};
 use nu_protocol::{Span, StreamDataType};
 
 use crate::{protocol::os_pipe::OSError, Handle, OsPipe};
-use windows::Win32::{
-    Foundation::{CloseHandle, BOOL, HANDLE, INVALID_HANDLE_VALUE},
-    Security::SECURITY_ATTRIBUTES,
-    System::Pipes::{CreatePipe, SetNamedPipeHandleState, TransactNamedPipe, PIPE_TYPE_MESSAGE},
+use windows::{
+    core::HRESULT,
+    Win32::{
+        Foundation::{CloseHandle, BOOL, INVALID_HANDLE_VALUE},
+        Security::SECURITY_ATTRIBUTES,
+        Storage::FileSystem::{ReadFile, WriteFile},
+        System::Pipes::CreatePipe,
+    },
 };
 
 use super::{PipeError, PipeResult};
 
-const SECURITY_ATTRIBUTES_SIZE: u32 = std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32;
-
 const DEFAULT_SECURITY_ATTRIBUTES: SECURITY_ATTRIBUTES = SECURITY_ATTRIBUTES {
-    nLength: SECURITY_ATTRIBUTES_SIZE,
+    nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
     lpSecurityDescriptor: ptr::null_mut(),
     // bInheritHandle: BOOL::from(true),
     bInheritHandle: BOOL(1),
@@ -36,9 +38,6 @@ pub fn create_pipe(span: Span) -> Result<OsPipe, PipeError> {
     .map_err(|e| PipeError::FailedToCreatePipe(OSError(e)))?;
     let read_handle = Handle::Read(read_handle);
     let write_handle = Handle::Write(write_handle);
-
-    unsafe { SetNamedPipeHandleState(read_handle.native(), Some(&PIPE_TYPE_MESSAGE), None, None) }
-        .map_err(|e| PipeError::FailedSetNamedPipeHandleState(read_handle, e.into()))?;
 
     Ok(OsPipe {
         span,
@@ -61,35 +60,38 @@ pub fn create_pipe(span: Span) -> Result<OsPipe, PipeError> {
 // }
 
 pub fn close_handle(handle: Handle) -> PipeResult<()> {
-    // trace!("{} OsPipe::close for {:?}", header(), handle,);
-    unsafe { CloseHandle(HANDLE::from(handle)) }
+    // println!("{} OsPipe::close for {:?}", header(), handle,);
+    unsafe { CloseHandle(handle.native()) }
         .map_err(|e| PipeError::FailedToCloseHandle(handle, OSError(e)))
 }
 
-pub(crate) fn read_handle(handle: Handle, buf: &mut [u8]) -> PipeResult<usize> {
-    // trace!("{} OsPipe::read for {:?}", header(), handle,);
+pub fn read_handle(handle: Handle, buf: &mut [u8]) -> PipeResult<usize> {
+    // eprintln!("{} OsPipe::read for {:?}", header(), handle,);
 
     let mut bytes_read = 0;
-    unsafe {
-        TransactNamedPipe(
-            handle.native(),
-            None,
-            0,
-            Some(buf.as_mut_ptr() as *mut _),
-            buf.len() as u32,
-            &mut bytes_read,
-            None,
-        )
+    let res = unsafe { ReadFile(handle.native(), Some(buf), Some(&mut bytes_read), None) };
+
+    match res {
+        Ok(_) => Ok(bytes_read as usize),
+        Err(e) if e.code() == ERROR_BROKEN_PIPE => Ok(0),
+        Err(e) => Err(PipeError::FailedToRead(handle, e.into())),
     }
-    .map_err(|e| PipeError::FailedToRead(handle, e.into()))?;
-
-    // trace!("{} OsPipe::read: {} bytes", header(), bytes_read);
-
-    Ok(bytes_read as usize)
 }
 
+#[derive(Debug)]
+#[repr(transparent)]
+struct WindowsErrorCode(i32);
+
+impl PartialEq<WindowsErrorCode> for HRESULT {
+    fn eq(&self, other: &WindowsErrorCode) -> bool {
+        self.0 as u16 == other.0 as u16
+    }
+}
+
+const ERROR_BROKEN_PIPE: WindowsErrorCode = WindowsErrorCode(0x0000_006D);
+
 pub(crate) fn write_handle(handle: Handle, buf: &[u8]) -> io::Result<usize> {
-    // trace!(
+    // println!(
     //     "{} OsPipe::write for {:?} ({} bytes)",
     //     header(),
     //     handle,
@@ -97,20 +99,10 @@ pub(crate) fn write_handle(handle: Handle, buf: &[u8]) -> io::Result<usize> {
     // );
 
     let mut bytes_written = 0;
-    unsafe {
-        TransactNamedPipe(
-            handle.native(),
-            Some(buf.as_ptr() as *mut _),
-            buf.len() as u32,
-            None,
-            0,
-            &mut bytes_written,
-            None,
-        )
-    }
-    .map_err(|e| PipeError::FailedToWrite(handle, e.into()))?;
+    unsafe { WriteFile(handle.native(), Some(buf), Some(&mut bytes_written), None) }
+        .map_err(|e| PipeError::FailedToWrite(handle, e.into()))?;
 
-    // trace!("OsPipe::write: {} bytes", bytes_written);
+    // println!("OsPipe::write: {} bytes", bytes_written);
 
     Ok(bytes_written as usize)
 }

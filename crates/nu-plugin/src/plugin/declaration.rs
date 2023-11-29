@@ -201,9 +201,15 @@ impl Command for PluginDeclaration {
             Err(err) => Err(err),
         };
 
+        let time = std::time::Instant::now();
         if let Some(join_handle) = join_handle {
             _ = join_handle.join();
         }
+        println!(
+            "Plugin {} took {} ms",
+            self.name,
+            time.elapsed().as_micros() as f64 / 1000.0
+        );
 
         // We need to call .wait() on the child, or we'll risk summoning the zombie horde
         let _ = child.wait();
