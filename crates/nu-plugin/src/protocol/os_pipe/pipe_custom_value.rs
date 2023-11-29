@@ -1,4 +1,6 @@
-use std::{io::Read, process::Command};
+use std::io::Read;
+#[cfg(unix)]
+use std::process::Command;
 
 use log::trace;
 use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value};

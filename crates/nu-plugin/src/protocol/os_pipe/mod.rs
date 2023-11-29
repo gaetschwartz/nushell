@@ -1,6 +1,7 @@
+#[cfg(unix)]
+use std::process::Command;
 use std::{
     io::{Read, Write},
-    process::Command,
     thread::JoinHandle,
 };
 
@@ -25,21 +26,29 @@ pub enum PipeError {
     UnexpectedInvalidPipeHandle,
     FailedToCreatePipe(OSError),
     UnsupportedPlatform,
-    FailedToClose(Handle, OSError),
+    FailedToCloseHandle(Handle, OSError),
+    FailedToRead(Handle, std::io::Error),
+    FailedToWrite(Handle, std::io::Error),
+    FailedSetNamedPipeHandleState(Handle, OSError),
 }
 
+type PipeResult<T> = Result<T, PipeError>;
+
 #[cfg(windows)]
-type InnerHandleType = windows::core::Handle;
+type InnerHandleType = windows::Win32::Foundation::HANDLE;
 #[cfg(unix)]
 type InnerHandleType = libc::c_int;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum HandleTypeEnum {
     Read,
     Write,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Handle(pub(crate) InnerHandleType, HandleTypeEnum);
+pub struct Handle(
+    #[cfg_attr(windows, serde(with = "pipe_impl::handle_serialization"))] InnerHandleType,
+    HandleTypeEnum,
+);
 
 impl Handle {
     pub fn close(self) -> Result<(), PipeError> {
@@ -47,13 +56,17 @@ impl Handle {
     }
 
     #[allow(non_snake_case)]
-    fn Read(fds: i32) -> Handle {
-        Handle(fds, HandleTypeEnum::Read)
+    fn Read(handle: InnerHandleType) -> Handle {
+        Handle(handle, HandleTypeEnum::Read)
     }
 
     #[allow(non_snake_case)]
-    fn Write(fds: i32) -> Handle {
-        Handle(fds, HandleTypeEnum::Write)
+    fn Write(handle: InnerHandleType) -> Handle {
+        Handle(handle, HandleTypeEnum::Write)
+    }
+
+    fn native(&self) -> InnerHandleType {
+        self.0
     }
 }
 
@@ -69,7 +82,6 @@ pub struct OsPipe {
 impl OsPipe {
     /// Creates a new pipe. Pipes are unidirectional streams of bytes composed of a read end and a write end. They can be used for interprocess communication.
     /// Uses `pipe(2)` on unix and `CreatePipe` on windows.
-    #[inline(always)]
     pub fn create(span: Span) -> Result<Self, PipeError> {
         pipe_impl::create_pipe(span)
     }
@@ -155,6 +167,39 @@ impl From<Handle> for InnerHandleType {
     }
 }
 
+impl From<PipeError> for std::io::Error {
+    fn from(error: PipeError) -> Self {
+        match error {
+            PipeError::UnexpectedInvalidPipeHandle => {
+                std::io::Error::new(std::io::ErrorKind::Other, "Unexpected invalid pipe handle")
+            }
+            PipeError::FailedToCreatePipe(error) => std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to create pipe: {}", error.0),
+            ),
+            PipeError::UnsupportedPlatform => {
+                std::io::Error::new(std::io::ErrorKind::Other, "Unsupported platform for pipes")
+            }
+            PipeError::FailedToCloseHandle(_, error) => std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to close pipe handle: {}", error.0),
+            ),
+            PipeError::FailedToRead(_, error) => std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to read from pipe: {}", error),
+            ),
+            PipeError::FailedToWrite(_, error) => std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to write to pipe: {}", error),
+            ),
+            PipeError::FailedSetNamedPipeHandleState(_, error) => std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to set named pipe handle state: {:?}", error),
+            ),
+        }
+    }
+}
+
 /// A struct representing a buffered handle writer. Prefer this over `UnbufferedHandleWriter` for better performance.
 #[derive(Debug)]
 pub struct BufferedHandleWriter {
@@ -198,10 +243,11 @@ impl HasHandle for BufferedHandleWriter {
         self.handle
     }
 
+    #[allow(clippy::useless_conversion)]
     fn close(&mut self) -> Result<(), PipeError> {
         self.writer
             .flush()
-            .map_err(|e| PipeError::FailedToClose(self.handle, e.into()))?;
+            .map_err(|e| PipeError::FailedToWrite(self.handle, e.into()))?;
         self.handle.close()
     }
 }
@@ -238,7 +284,7 @@ pub struct HandleReader(Handle);
 
 impl std::io::Read for HandleReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        pipe_impl::read_handle(self.0, buf)
+        pipe_impl::read_handle(self.0, buf).map_err(|e| e.into())
     }
 }
 
@@ -260,9 +306,19 @@ impl From<PipeError> for ShellError {
             PipeError::UnsupportedPlatform => {
                 ShellError::IOError("Unsupported platform for pipes".to_string())
             }
-            PipeError::FailedToClose(v, e) => {
+            PipeError::FailedToCloseHandle(v, e) => {
                 ShellError::IOError(format!("Failed to close pipe handle {:?}: {}", v, e.0))
             }
+            PipeError::FailedToRead(v, e) => {
+                ShellError::IOError(format!("Failed to read from pipe {:?}: {}", v, e))
+            }
+            PipeError::FailedToWrite(v, e) => {
+                ShellError::IOError(format!("Failed to write to pipe {:?}: {}", v, e))
+            }
+            PipeError::FailedSetNamedPipeHandleState(v, e) => ShellError::IOError(format!(
+                "Failed to set named pipe handle state {:?}: {:?}",
+                v, e
+            )),
         }
     }
 }
@@ -277,8 +333,17 @@ impl std::fmt::Display for PipeError {
                 write!(f, "Failed to create pipe: {}", error.0)
             }
             PipeError::UnsupportedPlatform => write!(f, "Unsupported platform for pipes"),
-            PipeError::FailedToClose(v, e) => {
+            PipeError::FailedToCloseHandle(v, e) => {
                 write!(f, "Failed to close pipe handle {:?}: {}", v, e.0)
+            }
+            PipeError::FailedToRead(v, e) => {
+                write!(f, "Failed to read from pipe {:?}: {}", v, e)
+            }
+            PipeError::FailedToWrite(v, e) => {
+                write!(f, "Failed to write to pipe {:?}: {}", v, e)
+            }
+            PipeError::FailedSetNamedPipeHandleState(v, e) => {
+                write!(f, "Failed to set named pipe handle state {:?}: {:?}", v, e)
             }
         }
     }
@@ -359,7 +424,7 @@ impl OsPipe {
 
                         let _ = os_pipe.close_read();
 
-                        let mut writer = os_pipe.writer();
+                        let mut writer = os_pipe.unbuffered_writer();
 
                         stdout.stream.for_each(|e| match e {
                             Ok(ref e) => {
@@ -392,8 +457,19 @@ impl OsPipe {
                                 trace!("OsPipe::start_pipe thread error: {:?}", e);
                             }
                         });
-                        trace!("OsPipe::start_pipe thread finished writing to pipe");
-                        let _ = writer.flush();
+                        match writer.flush() {
+                            Ok(_) => {
+                                trace!("OsPipe::start_pipe thread flushed pipe");
+                            }
+                            Err(e) => {
+                                trace!(
+                                    "OsPipe::start_pipe thread error: failed to flush pipe: {:?}",
+                                    e
+                                );
+                            }
+                        }
+
+                        trace!("OsPipe::start_pipe thread finished writing, closing pipe");
                         let _ = os_pipe.close_write();
                         // close the pipe when the stream is finished
                     })
@@ -421,18 +497,28 @@ impl From<std::io::Error> for OSError {
 
 impl std::fmt::Display for Handle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?} ({})", self.1, self.0)
+        let handle = {
+            #[cfg(windows)]
+            {
+                self.0 .0
+            }
+            #[cfg(unix)]
+            {
+                self.0
+            }
+        };
+        write!(f, "{:?} ({})", self.1, handle)
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
     fn test_pipe() {
         let pipe = OsPipe::create(Span::unknown()).unwrap();
+        println!("{:?}", pipe);
         let (mut reader, mut writer) = pipe.urw();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
@@ -516,6 +602,7 @@ mod tests {
 
         // serialize the pipe
         let serialized = serde_json::to_string(&pipe).unwrap();
+        println!("{}", serialized);
         // spawn a new process
         let res = std::process::Command::new("cargo")
             .arg("run")
@@ -527,13 +614,12 @@ mod tests {
             .unwrap();
 
         if !res.status.success() {
-            trace!("stderr: {}", String::from_utf8_lossy(res.stderr.as_slice()));
-            assert!(false);
+            panic!("stderr: {}", String::from_utf8_lossy(res.stderr.as_slice()));
         }
 
         assert!(res.status.success());
         assert_eq!(
-            String::from_utf8_lossy(res.stderr.as_slice()),
+            String::from_utf8_lossy(res.stdout.as_slice()),
             "hello world\n"
         );
     }
