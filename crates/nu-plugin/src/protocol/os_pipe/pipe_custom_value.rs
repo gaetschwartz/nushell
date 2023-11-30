@@ -136,6 +136,7 @@ impl CustomValue for StreamCustomValue {
             }
         }
         // self.os_pipe.close_write()?;
+        eprintln!("plugin::as_string: reading {:?}", self.os_pipe);
         let mut reader = self.os_pipe.open_read();
         let mut vec = Vec::new();
         let time0 = std::time::Instant::now();
@@ -144,7 +145,7 @@ impl CustomValue for StreamCustomValue {
         let string = String::from_utf8_lossy(&vec);
         let time2 = std::time::Instant::now();
         eprintln!(
-            "plugin::as_string: {} bytes, read: {} ms, decode: {} ms",
+            "plugin::as_string: read {} bytes, read: {} ms, decode: {} ms",
             vec.len(),
             (time1 - time0).as_micros() as f64 / 1000.0,
             (time2 - time1).as_micros() as f64 / 1000.0
