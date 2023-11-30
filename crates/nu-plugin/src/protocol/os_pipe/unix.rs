@@ -21,7 +21,7 @@ pub fn create_pipe(span: Span) -> Result<OsPipe, PipeError> {
         read_handle: Handle::Read(fds[0]),
         write_handle: Handle::Write(fds[1]),
         datatype: StreamDataType::Binary,
-        handle_policy: super::HandlePolicy::CloseOtherEndBeforeOperation,
+        handle_policy: super::HandlePolicy::Exclusive,
     })
 }
 

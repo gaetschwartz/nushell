@@ -44,7 +44,7 @@ pub fn create_pipe(span: Span) -> Result<OsPipe, PipeError> {
         read_handle,
         write_handle,
         datatype: StreamDataType::Binary,
-        handle_policy: super::HandlePolicy::ManuallyCloseAllHandles,
+        handle_policy: super::HandlePolicy::Inlusive,
     })
 }
 

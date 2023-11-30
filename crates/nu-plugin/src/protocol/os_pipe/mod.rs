@@ -79,9 +79,8 @@ pub struct OsPipe {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum HandlePolicy {
-    CloseOtherEndBeforeOperation,
-    #[serde(rename = "manual")]
-    ManuallyCloseAllHandles,
+    Exclusive,
+    Inlusive,
 }
 
 impl OsPipe {
@@ -103,6 +102,13 @@ impl OsPipe {
         pipe_impl::close_handle(self.read_handle)
     }
 
+    /// Set policy for the pipe handles. If set to `HandlePolicy::Exclusive`, the pipe will close the other end of the pipe when a handle is created.
+    pub fn set_handle_policy(&mut self, policy: HandlePolicy) {
+        self.handle_policy = policy;
+    }
+
+    /// Returns the read end of the pipe.
+
     /// Returns a `HandleReader` for reading from the pipe.
     ///
     /// # Examples
@@ -114,10 +120,9 @@ impl OsPipe {
     /// let reader = pipe.reader();
     /// // Use the reader to read from the pipe
     /// ```
-    #[inline(always)]
-    pub fn reader(&self) -> HandleReader {
+    pub fn open_read(&self) -> HandleReader {
         assert!(self.read_handle.1 == HandleTypeEnum::Read);
-        if self.handle_policy == HandlePolicy::CloseOtherEndBeforeOperation {
+        if self.handle_policy == HandlePolicy::Exclusive {
             let _ = self.close_write();
         }
         HandleReader(self.read_handle)
@@ -130,10 +135,9 @@ impl OsPipe {
     /// Otherwise the buffered writer will not flush the buffer to the pipe and the reader will hang waiting for more data.
     ///
     /// If you do not want to close the handle but still want to flush the buffer, you can call `writer.flush()` instead.
-    #[inline(always)]
-    pub fn writer(&self) -> BufferedHandleWriter {
+    pub fn open_write(&self) -> BufferedHandleWriter {
         assert!(self.write_handle.1 == HandleTypeEnum::Write);
-        if self.handle_policy == HandlePolicy::CloseOtherEndBeforeOperation {
+        if self.handle_policy == HandlePolicy::Exclusive {
             let _ = self.close_read();
         }
         BufferedHandleWriter::new(self.write_handle)
@@ -144,8 +148,7 @@ impl OsPipe {
     /// ### Closing
     /// It is crucial to call `writer.close()` on the writer when you are done with it to signal the end of the stream to the reader.
     /// Failing to do so will cause the reader to hang waiting for more data.
-    #[inline(always)]
-    pub fn unbuffered_writer(&self) -> UnbufferedHandleWriter {
+    pub fn open_write_unbuffered(&self) -> UnbufferedHandleWriter {
         assert!(self.write_handle.1 == HandleTypeEnum::Write);
         UnbufferedHandleWriter(self.write_handle)
     }
@@ -160,15 +163,13 @@ impl OsPipe {
     ///
     /// let (reader, writer) = rw();
     /// ```
-    #[inline(always)]
     pub fn rw(&self) -> (HandleReader, BufferedHandleWriter) {
-        (self.reader(), self.writer())
+        (self.open_read(), self.open_write())
     }
 
     /// Returns a tuple containing a `HandleReader` and an `UnbufferedHandleWriter`. Prefer `rw` over this for better performance.
-    #[inline(always)]
     pub fn urw(&self) -> (HandleReader, UnbufferedHandleWriter) {
-        (self.reader(), self.unbuffered_writer())
+        (self.open_read(), self.open_write_unbuffered())
     }
 }
 
@@ -434,7 +435,7 @@ impl OsPipe {
 
                     // let _ = os_pipe.close_read();
 
-                    let mut writer = os_pipe.unbuffered_writer();
+                    let mut writer = os_pipe.open_write_unbuffered();
 
                     stdout.stream.for_each(|e| match e {
                         Ok(ref e) => {
@@ -533,7 +534,8 @@ mod tests {
 
     #[test]
     fn test_pipe() {
-        let pipe = OsPipe::create(Span::unknown()).unwrap();
+        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        pipe.set_handle_policy(HandlePolicy::Inlusive);
         println!("{:?}", pipe);
         let (mut reader, mut writer) = pipe.urw();
         // write hello world to the pipe
@@ -553,8 +555,9 @@ mod tests {
 
     #[test]
     fn test_serialized_pipe() {
-        let pipe = OsPipe::create(Span::unknown()).unwrap();
-        let mut writer = pipe.unbuffered_writer();
+        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        pipe.set_handle_policy(HandlePolicy::Inlusive);
+        let mut writer = pipe.open_write_unbuffered();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -567,7 +570,7 @@ mod tests {
         println!("{}", serialized);
         // deserialize the pipe
         let deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
-        let mut reader = deserialized.reader();
+        let mut reader = deserialized.open_read();
 
         let mut buf = [0u8; 11];
 
@@ -580,8 +583,9 @@ mod tests {
 
     #[test]
     fn test_pipe_in_another_thread() {
-        let pipe = OsPipe::create(Span::unknown()).unwrap();
-        let mut writer = pipe.unbuffered_writer();
+        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
+        pipe.set_handle_policy(HandlePolicy::Inlusive);
+        let mut writer = pipe.open_write_unbuffered();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -594,7 +598,7 @@ mod tests {
         std::thread::spawn(move || {
             // deserialize the pipe
             let deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
-            let mut reader = deserialized.reader();
+            let mut reader = deserialized.open_read();
 
             let mut buf = [0u8; 11];
 
@@ -609,7 +613,7 @@ mod tests {
     #[test]
     fn test_pipe_in_another_process() {
         let pipe = OsPipe::create(Span::unknown()).unwrap();
-        let mut writer = pipe.unbuffered_writer();
+        let mut writer = pipe.open_write_unbuffered();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 

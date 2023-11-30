@@ -42,7 +42,7 @@ impl CustomValue for StreamCustomValue {
             self.typetag_name(),
             self.os_pipe
         );
-        let mut reader = self.os_pipe.reader();
+        let mut reader = self.os_pipe.open_read();
         let mut vec = Vec::new();
         _ = reader.read_to_end(&mut vec)?;
 
@@ -136,7 +136,7 @@ impl CustomValue for StreamCustomValue {
             }
         }
         // self.os_pipe.close_write()?;
-        let mut reader = self.os_pipe.reader();
+        let mut reader = self.os_pipe.open_read();
         let mut vec = Vec::new();
         let time0 = std::time::Instant::now();
         _ = reader.read_to_end(&mut vec)?;
