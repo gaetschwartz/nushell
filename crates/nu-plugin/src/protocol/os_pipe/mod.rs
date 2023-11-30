@@ -34,7 +34,9 @@ type InnerHandleType = libc::c_int;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum HandleTypeEnum {
+    #[serde(rename = "read")]
     Read,
+    #[serde(rename = "write")]
     Write,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,17 +89,18 @@ impl OsPipe {
     /// Creates a new pipe. Pipes are unidirectional streams of bytes composed of a read end and a write end. They can be used for interprocess communication.
     /// Uses `pipe(2)` on unix and `CreatePipe` on windows.
     pub fn create(span: Span) -> Result<Self, PipeError> {
-        pipe_impl::create_pipe(span)
+        let pipe = pipe_impl::create_pipe(span)?;
+        assert!(pipe.write_handle.1 == HandleTypeEnum::Write);
+        assert!(pipe.read_handle.1 == HandleTypeEnum::Read);
+        Ok(pipe)
     }
 
     /// Closes the write end of the pipe. This is needed to signal the end of the stream to the reader.
-    #[inline(always)]
     pub fn close_write(&self) -> Result<(), PipeError> {
         pipe_impl::close_handle(self.write_handle)
     }
 
     /// Closes the read end of the pipe. This is needed to signal we are done reading from the pipe.
-    #[inline(always)]
     pub fn close_read(&self) -> Result<(), PipeError> {
         pipe_impl::close_handle(self.read_handle)
     }
@@ -121,11 +124,14 @@ impl OsPipe {
     /// // Use the reader to read from the pipe
     /// ```
     pub fn open_read(&self) -> HandleReader {
-        assert!(self.read_handle.1 == HandleTypeEnum::Read);
+        self.on_open_read();
+        HandleReader(self.read_handle)
+    }
+
+    fn on_open_read(&self) {
         if self.handle_policy == HandlePolicy::Exclusive {
             let _ = self.close_write();
         }
-        HandleReader(self.read_handle)
     }
 
     /// Returns a buffered handle writer for the pipe. Prefer this over `unbuffered_writer` for better performance.
@@ -136,10 +142,7 @@ impl OsPipe {
     ///
     /// If you do not want to close the handle but still want to flush the buffer, you can call `writer.flush()` instead.
     pub fn open_write(&self) -> BufferedHandleWriter {
-        assert!(self.write_handle.1 == HandleTypeEnum::Write);
-        if self.handle_policy == HandlePolicy::Exclusive {
-            let _ = self.close_read();
-        }
+        self.on_open_write();
         BufferedHandleWriter::new(self.write_handle)
     }
 
@@ -149,8 +152,14 @@ impl OsPipe {
     /// It is crucial to call `writer.close()` on the writer when you are done with it to signal the end of the stream to the reader.
     /// Failing to do so will cause the reader to hang waiting for more data.
     pub fn open_write_unbuffered(&self) -> UnbufferedHandleWriter {
-        assert!(self.write_handle.1 == HandleTypeEnum::Write);
+        self.on_open_write();
         UnbufferedHandleWriter(self.write_handle)
+    }
+
+    fn on_open_write(&self) {
+        if self.handle_policy == HandlePolicy::Exclusive {
+            let _ = self.close_read();
+        }
     }
 
     /// Returns a tuple containing a `HandleReader` and a `BufferedHandleWriter`.
