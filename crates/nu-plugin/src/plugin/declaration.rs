@@ -2,7 +2,7 @@ use crate::{EvaluatedCall, OsPipe};
 
 use super::{call_plugin, create_command, get_plugin_encoding};
 use crate::protocol::{
-    CallInfo, CallInput, PluginCall, PluginCustomValue, PluginData, PluginResponse,
+    CallInfo, CallInput, PluginCall, PluginCustomValue, PluginData, PluginResponse, StreamEncoding,
 };
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,7 @@ impl PluginDeclaration {
             stdout: Some(_), ..
         } = input
         {
-            match OsPipe::create(call.head) {
+            match OsPipe::create_with_encoding(call.head, StreamEncoding::Zstd) {
                 Ok(os_pipe) => return Ok(CallInput::Pipe(os_pipe, Some(input))),
                 Err(e) => {
                     trace!("Unable to create pipe for plugin {}: {}", self.name, e);
