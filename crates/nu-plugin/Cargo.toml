@@ -23,6 +23,7 @@ rmp-serde = "1.1"
 serde = { version = "1.0" }
 serde_json = { version = "1.0" }
 log = "0.4.20"
+zstd = "0.13.0"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.52"

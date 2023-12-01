@@ -45,6 +45,7 @@ pub fn create_pipe(span: Span) -> Result<OsPipe, PipeError> {
         write_handle: Handle::Write(fds[1]),
         datatype: StreamDataType::Binary,
         handle_policy: super::HandlePolicy::Exclusive,
+        encoding: super::StreamEncoding::Raw,
     })
 }
 
@@ -62,7 +63,7 @@ pub fn close_handle(handle: Handle) -> Result<(), PipeError> {
     Ok(())
 }
 
-pub fn read_handle(handle: Handle, buf: &mut [u8]) -> std::io::Result<usize> {
+pub fn read_handle(handle: &mut Handle, buf: &mut [u8]) -> std::io::Result<usize> {
     trace_pipe!("{:?}", handle);
     let result = unsafe { libc::read(handle.native(), buf.as_mut_ptr() as *mut _, buf.len()) };
     if result < 0 {
