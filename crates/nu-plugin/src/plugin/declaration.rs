@@ -142,6 +142,7 @@ impl Command for PluginDeclaration {
                 Vec::new(),
             )
         })?;
+
         let join_handle = OsPipe::start_pipe(&mut call_input)?;
 
         let plugin_call = PluginCall::CallInfo(CallInfo {

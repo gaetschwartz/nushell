@@ -185,6 +185,60 @@ impl Iterator for RawStream {
     }
 }
 
+impl std::io::Read for RawStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut total_read = 0;
+
+        while total_read < buf.len() {
+            match self.stream.next() {
+                Some(Ok(mut v)) => {
+                    if !self.leftover.is_empty() {
+                        for b in self.leftover.drain(..).rev() {
+                            v.insert(0, b);
+                        }
+                    }
+
+                    let to_read = std::cmp::min(buf.len() - total_read, v.len());
+
+                    buf[total_read..total_read + to_read].copy_from_slice(&v[0..to_read]);
+
+                    if to_read < v.len() {
+                        self.leftover = v[to_read..].to_vec();
+                    }
+
+                    total_read += to_read;
+                }
+                Some(Err(_)) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Error in stream",
+                    ))
+                }
+                None => {
+                    if !self.leftover.is_empty() {
+                        let to_read = std::cmp::min(buf.len() - total_read, self.leftover.len());
+
+                        buf[total_read..total_read + to_read]
+                            .copy_from_slice(&self.leftover[0..to_read]);
+
+                        if to_read < self.leftover.len() {
+                            self.leftover = self.leftover[to_read..].to_vec();
+                        } else {
+                            self.leftover.clear();
+                        }
+
+                        total_read += to_read;
+                    } else {
+                        return Ok(total_read);
+                    }
+                }
+            }
+        }
+
+        Ok(total_read)
+    }
+}
+
 /// A potentially infinite stream of values, optionally with a mean to send a Ctrl-C signal to stop
 /// the stream from continuing.
 ///
@@ -238,5 +292,54 @@ impl Iterator for ListStream {
         } else {
             self.stream.next()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::RawStream;
+    use std::io::Read;
+
+    #[test]
+    fn raw_stream_reads() {
+        let mut stream = RawStream::new(
+            Box::new(
+                vec!["Hello", " ", "World", "!"]
+                    .into_iter()
+                    .map(|x| Ok(x.to_string().into_bytes())),
+            ),
+            None,
+            crate::Span::unknown(),
+            None,
+        );
+
+        let mut buf: Vec<u8> = vec![];
+
+        stream.read_to_end(&mut buf).unwrap();
+
+        assert_eq!(buf, "Hello World!".as_bytes());
+    }
+
+    #[test]
+    fn raw_stream_with_leftover_reads() {
+        let mut stream = RawStream::new(
+            Box::new(
+                vec!["Hello", " ", "World", "!"]
+                    .into_iter()
+                    .map(|x| Ok(x.to_string().into_bytes())),
+            ),
+            None,
+            crate::Span::unknown(),
+            None,
+        );
+
+        let mut buf: Vec<u8> = vec![];
+
+        stream.leftover = "Hello ".as_bytes().to_vec();
+
+        stream.read_to_end(&mut buf).unwrap();
+
+        assert_eq!(buf, "Hello World!".as_bytes());
     }
 }
