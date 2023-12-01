@@ -17,12 +17,19 @@ mod pipe_impl;
 use misc::*;
 
 const BUFFER_CAPACITY: usize = 16 * 1024 * 1024;
+const ZSTD_COMPRESSION_LEVEL: i32 = {
+    if let Some(level) = option_env!("ZSTD_COMPRESSION_LEVEL") {
+        konst::unwrap_ctx!(konst::primitive::parse_i32(level))
+    } else {
+        3
+    }
+};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct OsPipe {
     pub span: Span,
     pub datatype: StreamDataType,
-    pub encoding: StreamEncoding,
+    encoding: StreamEncoding,
 
     read_handle: Handle,
     write_handle: Handle,
@@ -40,9 +47,14 @@ impl OsPipe {
     /// Creates a new pipe. Pipes are unidirectional streams of bytes composed of a read end and a write end. They can be used for interprocess communication.
     /// Uses `pipe(2)` on unix and `CreatePipe` on windows.
     pub fn create(span: Span) -> Result<Self, PipeError> {
-        let pipe = pipe_impl::create_pipe(span)?;
+        Self::create_with_encoding(span, StreamEncoding::Raw)
+    }
+
+    pub fn create_with_encoding(span: Span, encoding: StreamEncoding) -> Result<Self, PipeError> {
+        let mut pipe = pipe_impl::create_pipe(span)?;
         assert!(pipe.write_handle.1 == HandleTypeEnum::Write);
         assert!(pipe.read_handle.1 == HandleTypeEnum::Read);
+        pipe.encoding = encoding;
         Ok(pipe)
     }
 
@@ -74,9 +86,10 @@ impl OsPipe {
     /// let reader = pipe.reader();
     /// // Use the reader to read from the pipe
     /// ```
-    pub fn open_read(&self) -> BufferedHandleReader {
+    pub fn open_read(&self) -> HandleReader {
         self.on_open_read();
-        BufferedHandleReader::new(self.read_handle).expect("failed to create reader")
+
+        HandleReader::new(self.read_handle, self.encoding)
     }
 
     fn on_open_read(&self) {
@@ -92,29 +105,16 @@ impl OsPipe {
     /// Otherwise the buffered writer will not flush the buffer to the pipe and the reader will hang waiting for more data.
     ///
     /// If you do not want to close the handle but still want to flush the buffer, you can call `writer.flush()` instead.
-    pub fn open_write(&self) -> BufferedHandleWriter {
+    pub fn open_write(&self) -> HandleWriter {
         self.on_open_write();
-        BufferedHandleWriter::new(self.write_handle)
+        self.open_write_raw()
     }
 
-    /// Returns an unbuffered writer for the pipe. Prefer `writer` over this for better performance.
-    ///
-    /// ### Closing
-    /// It is crucial to call `writer.close()` on the writer when you are done with it to signal the end of the stream to the reader.
-    /// Failing to do so will cause the reader to hang waiting for more data.
-    pub fn open_write_unbuffered(&self) -> UnbufferedHandleWriter {
-        self.on_open_write();
-        UnbufferedHandleWriter(self.write_handle)
+    pub fn open_write_raw(&self) -> HandleWriter {
+        HandleWriter::new(self.write_handle, self.encoding)
     }
 
-    /// Returns an unbuffered reader.
-    /// Prefer `reader` over this for better performance.
-    pub fn open_read_unbuffered(&self) -> UnbufferedHandleReader {
-        self.on_open_read();
-        UnbufferedHandleReader(self.read_handle)
-    }
-
-    fn on_open_write(&self) {
+    pub fn on_open_write(&self) {
         if self.handle_policy == HandlePolicy::Exclusive {
             let _ = self.close_read();
         }
@@ -130,13 +130,8 @@ impl OsPipe {
     ///
     /// let (reader, writer) = rw();
     /// ```
-    pub fn rw(&self) -> (BufferedHandleReader, BufferedHandleWriter) {
+    pub fn rw(&self) -> (HandleReader, HandleWriter) {
         (self.open_read(), self.open_write())
-    }
-
-    /// Returns a tuple containing a `HandleReader` and an `UnbufferedHandleWriter`. Prefer `rw` over this for better performance.
-    pub fn urw(&self) -> (UnbufferedHandleReader, UnbufferedHandleWriter) {
-        (self.open_read_unbuffered(), self.open_write_unbuffered())
     }
 }
 
@@ -183,140 +178,29 @@ impl From<Handle> for InnerHandleType {
 }
 
 /// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
-#[repr(transparent)]
-pub struct UnbufferedHandleWriter(Handle);
-
-impl UnbufferedHandleWriter {
-    pub fn buffered(self) -> BufferedHandleWriter {
-        BufferedHandleWriter::new(self.0)
-    }
-}
-
-/// A struct representing a handle reader.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UnbufferedHandleReader {
+pub struct HandleWriter {
     handle: Handle,
+    writer: Box<dyn FinishableWrite<Inner = Handle>>,
     encoding: StreamEncoding,
-    reader: Box<dyn std::io::Read>,
 }
 
-impl UnbufferedHandleReader {
-    fn new(handle: Handle, encoding: StreamEncoding) -> Result<Self, std::io::Error> {
-        Ok(Self {
+impl HandleWriter {
+    pub fn new(handle: Handle, encoding: StreamEncoding) -> Self {
+        Self {
             handle,
             encoding,
-            reader: match encoding {
-                StreamEncoding::Zstd => {
-                    Box::new(zstd::stream::Decoder::new(std::io::BufReader::new(handle))?)
-                }
-                StreamEncoding::Raw => Box::new(std::io::BufReader::new(handle)),
+            writer: match encoding {
+                StreamEncoding::Zstd => Box::new(Some(
+                    zstd::stream::Encoder::new(handle, ZSTD_COMPRESSION_LEVEL)
+                        .expect("failed to create zstd encoder"),
+                )),
+                StreamEncoding::Raw => Box::new(handle),
             },
-        })
-    }
-}
-
-impl std::io::Read for UnbufferedHandleReader {
-    #[allow(clippy::useless_conversion)]
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        pipe_impl::read_handle(self.0, buf).map_err(|e| e.into())
-    }
-}
-
-#[derive(Debug)]
-pub struct BufferedHandleReader {
-    reader: std::io::BufReader<UnbufferedHandleReader>,
-}
-
-impl BufferedHandleReader {
-    fn new(handle: Handle) -> Self {
-        Self {
-            reader: std::io::BufReader::with_capacity(
-                BUFFER_CAPACITY,
-                UnbufferedHandleReader(handle),
-            ),
         }
     }
 }
 
-impl std::io::Read for BufferedHandleReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.reader.read(buf)
-    }
-}
-
-/// A struct representing a buffered handle writer. Prefer this over `UnbufferedHandleWriter` for better performance.
-#[derive(Debug)]
-pub struct BufferedHandleWriter {
-    handle: Handle,
-    writer: std::io::BufWriter<UnbufferedHandleWriter>,
-}
-
-impl BufferedHandleWriter {
-    fn new(handle: Handle) -> Self {
-        Self {
-            handle,
-            writer: std::io::BufWriter::with_capacity(
-                BUFFER_CAPACITY,
-                UnbufferedHandleWriter(handle),
-            ),
-        }
-    }
-}
-
-/// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
-#[repr(transparent)]
-pub struct UnbufferedHandleWriter(Handle);
-
-pub trait HasHandle {
-    /// Returns the handle of the object.
-    fn handle(&self) -> Handle;
-
-    /// Closes the handle of the object.
-    #[inline(always)]
-    fn close(&mut self) -> Result<(), PipeError> {
-        self.handle().close()
-    }
-}
-
-impl HasHandle for HandleReader {
-    fn handle(&self) -> Handle {
-        self.handle
-    }
-}
-
-impl HasHandle for BufferedHandleWriter {
-    fn handle(&self) -> Handle {
-        self.handle
-    }
-
-    #[allow(clippy::useless_conversion)]
-    fn close(&mut self) -> Result<(), PipeError> {
-        self.writer
-            .flush()
-            .map_err(|e| PipeError::FailedToWrite(self.handle, e.into()))?;
-        self.handle.close()
-    }
-}
-
-impl HasHandle for UnbufferedHandleWriter {
-    fn handle(&self) -> Handle {
-        self.0
-    }
-}
-
-impl std::io::Write for UnbufferedHandleWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        pipe_impl::write_handle(self.0, buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl std::io::Write for BufferedHandleWriter {
+impl std::io::Write for HandleWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.writer.write(buf)
     }
@@ -326,35 +210,165 @@ impl std::io::Write for BufferedHandleWriter {
     }
 }
 
-impl HasHandle for UnbufferedHandleReader {
-    fn handle(&self) -> Handle {
-        self.0
+trait FinishableWrite {
+    type Inner;
+
+    fn finish(&mut self) -> Result<Self::Inner, std::io::Error>;
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize>;
+    fn flush(&mut self) -> std::io::Result<()>;
+}
+
+impl<T: std::io::Write> FinishableWrite for Option<zstd::stream::Encoder<'_, T>> {
+    fn finish(&mut self) -> Result<T, std::io::Error> {
+        let encoder = self.take().expect("failed to take encoder");
+        zstd::stream::Encoder::finish(encoder)
+    }
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.as_mut().map_or(Ok(0), |w| w.write(buf))
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.as_mut().map_or(Ok(()), |w| w.flush())
+    }
+    type Inner = T;
+}
+
+impl FinishableWrite for Handle {
+    type Inner = Handle;
+    #[inline(always)]
+    fn finish(&mut self) -> Result<Handle, std::io::Error> {
+        Ok(*self)
+    }
+
+    #[inline(always)]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        std::io::Write::write(self, buf)
+    }
+
+    #[inline(always)]
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(self)
     }
 }
 
-impl HasHandle for BufferedHandleReader {
-    fn handle(&self) -> Handle {
-        self.reader.get_ref().handle()
+/// A struct representing a handle reader.
+pub struct HandleReader {
+    handle: Handle,
+    encoding: StreamEncoding,
+    reader: Box<dyn std::io::Read>,
+}
+
+impl HandleReader {
+    fn new(handle: Handle, encoding: StreamEncoding) -> Self {
+        Self {
+            handle,
+            encoding,
+            reader: match encoding {
+                StreamEncoding::Zstd => {
+                    if let Ok(decoder) = zstd::stream::Decoder::new(handle) {
+                        Box::new(decoder)
+                    } else {
+                        trace!("failed to create zstd decoder, falling back to raw");
+                        Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, handle))
+                    }
+                }
+                StreamEncoding::Raw => {
+                    Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, handle))
+                }
+            },
+        }
     }
 }
 
-impl HasHandle for BufferedHandleWriter {
+impl std::io::Read for Handle {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        pipe_impl::read_handle(*self, buf)
+    }
+}
+
+impl std::io::Write for Handle {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        pipe_impl::write_handle(*self, buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl std::io::Read for HandleReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(buf)
+    }
+}
+
+pub trait HandleIO {
+    /// Returns the handle of the object.
+    fn handle(&self) -> Handle;
+    fn encoding(&self) -> StreamEncoding;
+}
+
+pub trait AsNativeHandle {
+    /// Returns the native handle of the object.
+    fn as_native_handle(&self) -> InnerHandleType;
+}
+
+impl AsNativeHandle for Handle {
+    fn as_native_handle(&self) -> InnerHandleType {
+        self.native()
+    }
+}
+
+impl<T: HandleIO> AsNativeHandle for T {
+    fn as_native_handle(&self) -> InnerHandleType {
+        self.handle().native()
+    }
+}
+
+impl HandleIO for HandleWriter {
     fn handle(&self) -> Handle {
         self.handle
     }
 
-    #[allow(clippy::useless_conversion)]
-    fn close(&mut self) -> Result<(), PipeError> {
-        self.writer
-            .flush()
-            .map_err(|e| PipeError::FailedToWrite(self.handle, e.into()))?;
-        self.handle.close()
+    fn encoding(&self) -> StreamEncoding {
+        self.encoding
     }
 }
 
-impl HasHandle for UnbufferedHandleWriter {
+impl HandleIO for HandleReader {
     fn handle(&self) -> Handle {
-        self.0
+        self.handle
+    }
+
+    fn encoding(&self) -> StreamEncoding {
+        self.encoding
+    }
+}
+
+pub trait Closeable: HandleIO {
+    /// Closes the object.
+    fn close(&mut self) -> Result<(), std::io::Error>;
+}
+
+impl Closeable for HandleWriter {
+    fn close(&mut self) -> Result<(), std::io::Error> {
+        self.writer.finish()?;
+        self.handle.close().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to close handle: {:?}", e),
+            )
+        })
+    }
+}
+
+impl Closeable for HandleReader {
+    fn close(&mut self) -> Result<(), std::io::Error> {
+        self.handle.close().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to close handle: {:?}", e),
+            )
+        })
     }
 }
 
@@ -369,13 +383,14 @@ impl OsPipe {
                     return Ok(None);
                 };
                 let os_pipe = os_pipe.clone();
-                let writer = os_pipe.open_write();
+
+                os_pipe.on_open_write();
 
                 let handle = std::thread::spawn(move || {
-                    let mut writer = writer;
-                    let stdout = stdout;
+                    let mut writer = os_pipe.open_write_raw();
+                    let mut stdout = stdout;
 
-                    match zstd::stream::copy_encode(stdout, &mut writer, 0) {
+                    match std::io::copy(&mut stdout, &mut writer) {
                         Ok(_) => {
                             trace!("OsPipe::start_pipe thread finished writing");
                         }
@@ -429,6 +444,8 @@ pub enum StreamEncoding {
 #[cfg(test)]
 mod tests {
 
+    use std::io::Read;
+
     use super::*;
 
     #[test]
@@ -436,7 +453,7 @@ mod tests {
         let mut pipe = OsPipe::create(Span::unknown()).unwrap();
         pipe.set_handle_policy(HandlePolicy::Inclusive);
         println!("{:?}", pipe);
-        let (mut reader, mut writer) = pipe.urw();
+        let (mut reader, mut writer) = pipe.rw();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
         pipe.close_write().unwrap();
@@ -456,7 +473,7 @@ mod tests {
     fn test_serialized_pipe() {
         let mut pipe = OsPipe::create(Span::unknown()).unwrap();
         pipe.set_handle_policy(HandlePolicy::Inclusive);
-        let mut writer = pipe.open_write_unbuffered();
+        let mut writer = pipe.open_write();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -484,7 +501,7 @@ mod tests {
     fn test_pipe_in_another_thread() {
         let mut pipe = OsPipe::create(Span::unknown()).unwrap();
         pipe.set_handle_policy(HandlePolicy::Inclusive);
-        let mut writer = pipe.open_write_unbuffered();
+        let mut writer = pipe.open_write();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -512,7 +529,7 @@ mod tests {
     #[test]
     fn test_pipe_in_another_process() {
         let pipe = OsPipe::create(Span::unknown()).unwrap();
-        let mut writer = pipe.open_write_unbuffered();
+        let mut writer = pipe.open_write();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 

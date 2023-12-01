@@ -5,7 +5,7 @@ mod plugin_data;
 
 pub use evaluated_call::EvaluatedCall;
 use nu_protocol::{PipelineData, PluginSignature, ShellError, Span, Value};
-pub use os_pipe::{Handle, OsPipe, StreamCustomValue};
+pub use os_pipe::{Handle, OsPipe, StreamCustomValue, StreamEncoding};
 pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
 use serde::{Deserialize, Serialize};
