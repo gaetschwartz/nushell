@@ -1,10 +1,11 @@
 mod declaration;
 pub use declaration::PluginDeclaration;
 use nu_engine::documentation::get_flags_section;
+use nu_pipes::StreamCustomValue;
 use std::collections::HashMap;
 
 use crate::protocol::{CallInput, LabeledError, PluginCall, PluginData, PluginResponse};
-use crate::{EncodingType, StreamCustomValue};
+use crate::EncodingType;
 use std::env;
 use std::fmt::Write;
 use std::io::{BufReader, ErrorKind, Read, Write as WriteTrait};

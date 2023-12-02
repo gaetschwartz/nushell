@@ -2,16 +2,16 @@ use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value}
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
-use crate::OsPipe;
+use crate::unidirectional::{PipeRead, UnOpenedPipe};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct StreamCustomValue {
     pub span: Span,
-    pub os_pipe: OsPipe,
+    pub os_pipe: UnOpenedPipe<PipeRead>,
 }
 
 impl StreamCustomValue {
-    pub fn new(os_pipe: OsPipe, span: Span) -> Self {
+    pub fn new(os_pipe: UnOpenedPipe<PipeRead>, span: Span) -> Self {
         Self { span, os_pipe }
     }
 }
@@ -28,7 +28,7 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn to_base_value(&self, span: Span) -> Result<Value, ShellError> {
-        let mut reader = self.os_pipe.open_read();
+        let mut reader = self.os_pipe.open()?;
         let mut vec = Vec::new();
         _ = reader.read_to_end(&mut vec)?;
 
@@ -60,12 +60,12 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn as_string(&self) -> Result<String, ShellError> {
-        let mut reader = self.os_pipe.open_read();
+        let mut reader = self.os_pipe.open()?;
         let mut vec = Vec::new();
         _ = reader.read_to_end(&mut vec)?;
         let string = String::from_utf8_lossy(&vec);
 
-        self.os_pipe.close_read()?;
+        reader.close()?;
         Ok(string.to_string())
     }
 

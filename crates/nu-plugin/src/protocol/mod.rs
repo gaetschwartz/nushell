@@ -1,11 +1,10 @@
 mod evaluated_call;
-mod os_pipe;
 mod plugin_custom_value;
 mod plugin_data;
 
 pub use evaluated_call::EvaluatedCall;
+use nu_pipes::unidirectional::{PipeRead, PipeWrite, UnOpenedPipe};
 use nu_protocol::{PipelineData, PluginSignature, ShellError, Span, Value};
-pub use os_pipe::{Handle, OsPipe, StreamCustomValue, StreamEncoding};
 pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
 use serde::{Deserialize, Serialize};
@@ -21,7 +20,10 @@ pub struct CallInfo {
 pub enum CallInput {
     Value(Value),
     Data(PluginData),
-    Pipe(OsPipe, #[serde(skip, default)] Option<PipelineData>),
+    Pipe(
+        UnOpenedPipe<PipeRead>,
+        #[serde(skip, default)] Option<(UnOpenedPipe<PipeWrite>, PipelineData)>,
+    ),
 }
 
 impl Clone for CallInput {
@@ -29,7 +31,7 @@ impl Clone for CallInput {
         match self {
             CallInput::Value(v) => CallInput::Value(v.clone()),
             CallInput::Data(d) => CallInput::Data(d.clone()),
-            CallInput::Pipe(p, _) => CallInput::Pipe(p.clone(), None),
+            CallInput::Pipe(rp, _) => CallInput::Pipe(rp.clone(), None),
         }
     }
 }

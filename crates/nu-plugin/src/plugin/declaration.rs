@@ -1,12 +1,16 @@
-use crate::{EvaluatedCall, OsPipe};
+use crate::EvaluatedCall;
 
 use super::{call_plugin, create_command, get_plugin_encoding};
 use crate::protocol::{
-    CallInfo, CallInput, PluginCall, PluginCustomValue, PluginData, PluginResponse, StreamEncoding,
+    CallInfo, CallInput, PluginCall, PluginCustomValue, PluginData, PluginResponse,
 };
 use std::path::{Path, PathBuf};
 
 use log::trace;
+use nu_pipes::unidirectional::{
+    PipeMode, UniDirectionalPipeOptions, UnidirectionalPipe,
+};
+use nu_pipes::StreamEncoding;
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::{ast::Call, PluginSignature, Signature};
 use nu_protocol::{Example, PipelineData, ShellError, Value};
@@ -35,8 +39,13 @@ impl PluginDeclaration {
             stdout: Some(_), ..
         } = input
         {
-            match OsPipe::create_with_encoding(call.head, StreamEncoding::Zstd) {
-                Ok(os_pipe) => return Ok(CallInput::Pipe(os_pipe, Some(input))),
+            match UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
+                encoding: StreamEncoding::Zstd,
+                mode: PipeMode::CrossProcess,
+            }) {
+                Ok(UnidirectionalPipe { read, write }) => {
+                    return Ok(CallInput::Pipe(read, Some((write, input))))
+                }
                 Err(e) => {
                     trace!("Unable to create pipe for plugin {}: {}", self.name, e);
                 }
@@ -143,7 +152,10 @@ impl Command for PluginDeclaration {
             }
         })?;
 
-        let join_handle = OsPipe::start_pipe(&mut call_input)?;
+        let join_handle = match call_input {
+            CallInput::Pipe(_, Some((ref write, ref mut pipeline))) => write.send(pipeline)?,
+            _ => None,
+        };
 
         let plugin_call = PluginCall::CallInfo(CallInfo {
             name: self.name.clone(),
