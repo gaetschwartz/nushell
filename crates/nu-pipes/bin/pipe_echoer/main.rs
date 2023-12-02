@@ -1,10 +1,11 @@
-use nu_plugin::OsPipe;
 use std::io::Read;
+
+use nu_pipes::unidirectional::{PipeRead, UnOpenedPipe};
 
 fn main() {
     let serialized = std::env::args().nth(1).unwrap();
-    let deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
-    let mut reader = deserialized.open_read();
+    let deserialized: UnOpenedPipe<PipeRead> = serde_json::from_str(&serialized).unwrap();
+    let mut reader = deserialized.open().unwrap();
 
     let mut buf = [0u8; 11];
 

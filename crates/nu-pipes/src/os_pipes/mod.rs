@@ -1,138 +1,27 @@
 use std::{fmt::Debug, io::Write, thread::JoinHandle};
 
 use log::trace;
-use nu_protocol::{PipelineData, ShellError, Span, StreamDataType};
-pub use pipe_custom_value::StreamCustomValue;
+use nu_protocol::ShellError;
 use serde::{Deserialize, Serialize};
 
-use super::CallInput;
-mod big_array;
-mod encoder;
-mod misc;
-mod pipe_custom_value;
+use crate::{InnerHandleType, MaybeRawStream, PipeError};
+
+use self::unidirectional::{PipeWrite, UnOpenedPipe};
+
+// pub mod bidirectional;
+pub mod unidirectional;
+
 #[cfg_attr(windows, path = "windows.rs")]
 #[cfg_attr(unix, path = "unix.rs")]
-mod pipe_impl;
-
-use misc::*;
+pub mod pipe_impl;
 
 const BUFFER_CAPACITY: usize = 16 * 1024 * 1024;
-const ZSTD_COMPRESSION_LEVEL: i32 = {
-    if let Some(level) = option_env!("ZSTD_COMPRESSION_LEVEL") {
-        konst::unwrap_ctx!(konst::primitive::parse_i32(level))
-    } else {
-        3
-    }
-};
+const ZSTD_COMPRESSION_LEVEL: i32 = 0;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct OsPipe {
-    pub span: Span,
-    pub datatype: StreamDataType,
-    encoding: StreamEncoding,
-
+pub(crate) struct OsPipe {
     read_handle: Handle,
     write_handle: Handle,
-
-    handle_policy: HandlePolicy,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub enum HandlePolicy {
-    Exclusive,
-    Inclusive,
-}
-
-impl OsPipe {
-    /// Creates a new pipe. Pipes are unidirectional streams of bytes composed of a read end and a write end. They can be used for interprocess communication.
-    /// Uses `pipe(2)` on unix and `CreatePipe` on windows.
-    pub fn create(span: Span) -> Result<Self, PipeError> {
-        Self::create_with_encoding(span, StreamEncoding::Raw)
-    }
-
-    pub fn create_with_encoding(span: Span, encoding: StreamEncoding) -> Result<Self, PipeError> {
-        let mut pipe = pipe_impl::create_pipe(span)?;
-        assert!(pipe.write_handle.1 == HandleTypeEnum::Write);
-        assert!(pipe.read_handle.1 == HandleTypeEnum::Read);
-        pipe.encoding = encoding;
-        Ok(pipe)
-    }
-
-    /// Closes the write end of the pipe. This is needed to signal the end of the stream to the reader.
-    pub fn close_write(&self) -> Result<(), PipeError> {
-        pipe_impl::close_handle(self.write_handle)
-    }
-
-    /// Closes the read end of the pipe. This is needed to signal we are done reading from the pipe.
-    pub fn close_read(&self) -> Result<(), PipeError> {
-        pipe_impl::close_handle(self.read_handle)
-    }
-
-    /// Set policy for the pipe handles. If set to `HandlePolicy::Exclusive`, the pipe will close the other end of the pipe when a handle is created.
-    pub fn set_handle_policy(&mut self, policy: HandlePolicy) {
-        self.handle_policy = policy;
-    }
-
-    /// Returns the read end of the pipe.
-
-    /// Returns a `HandleReader` for reading from the pipe.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crate::protocol::os_pipe::HandleReader;
-    ///
-    /// let pipe = /* create an instance of the pipe */;
-    /// let reader = pipe.reader();
-    /// // Use the reader to read from the pipe
-    /// ```
-    pub fn open_read(&self) -> HandleReader {
-        self.on_open_read();
-
-        HandleReader::new(self.read_handle, self.encoding)
-    }
-
-    fn on_open_read(&self) {
-        if self.handle_policy == HandlePolicy::Exclusive {
-            let _ = self.close_write();
-        }
-    }
-
-    /// Returns a buffered handle writer for the pipe. Prefer this over `unbuffered_writer` for better performance.
-    ///
-    /// ### Closing
-    /// It is crucial to call `writer.close()` on the writer when you are done with it.
-    /// Otherwise the buffered writer will not flush the buffer to the pipe and the reader will hang waiting for more data.
-    ///
-    /// If you do not want to close the handle but still want to flush the buffer, you can call `writer.flush()` instead.
-    pub fn open_write(&self) -> HandleWriter {
-        self.on_open_write();
-        self.open_write_raw()
-    }
-
-    pub fn open_write_raw(&self) -> HandleWriter {
-        HandleWriter::new(self.write_handle, self.encoding)
-    }
-
-    pub fn on_open_write(&self) {
-        if self.handle_policy == HandlePolicy::Exclusive {
-            let _ = self.close_read();
-        }
-    }
-
-    /// Returns a tuple containing a `HandleReader` and a `BufferedHandleWriter`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use crate::protocol::os_pipe::HandleReader;
-    /// use crate::protocol::os_pipe::BufferedHandleWriter;
-    ///
-    /// let (reader, writer) = rw();
-    /// ```
-    pub fn rw(&self) -> (HandleReader, HandleWriter) {
-        (self.open_read(), self.open_write())
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -194,7 +83,7 @@ impl HandleWriter {
                     zstd::stream::Encoder::new(handle, ZSTD_COMPRESSION_LEVEL)
                         .expect("failed to create zstd encoder"),
                 )),
-                StreamEncoding::Raw => Box::new(handle),
+                StreamEncoding::None => Box::new(handle),
             },
         }
     }
@@ -271,7 +160,7 @@ impl HandleReader {
                         Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, handle))
                     }
                 }
-                StreamEncoding::Raw => {
+                StreamEncoding::None => {
                     Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, handle))
                 }
             },
@@ -372,22 +261,20 @@ impl Closeable for HandleReader {
     }
 }
 
-impl OsPipe {
+impl UnOpenedPipe<PipeWrite> {
     /// Starts a new thread that will pipe the stdout stream to the os pipe.
     ///
     /// Returns a handle to the thread if the input is a pipe and the output is an external stream.
-    pub fn start_pipe(input: &mut CallInput) -> Result<Option<JoinHandle<()>>, ShellError> {
-        match input {
-            CallInput::Pipe(os_pipe, Some(PipelineData::ExternalStream { stdout, .. })) => {
-                let Some(stdout) = stdout.take() else {
-                    return Ok(None);
-                };
-                let os_pipe = os_pipe.clone();
-
-                os_pipe.on_open_write();
+    pub fn send(
+        &self,
+        input: &mut impl MaybeRawStream,
+    ) -> Result<Option<JoinHandle<()>>, ShellError> {
+        match input.take_stream() {
+            Some(stdout) => {
+                let writer = self.open().unwrap();
 
                 let handle = std::thread::spawn(move || {
-                    let mut writer = os_pipe.open_write_raw();
+                    let mut writer = writer;
                     let mut stdout = stdout;
 
                     match std::io::copy(&mut stdout, &mut writer) {
@@ -438,7 +325,7 @@ impl std::fmt::Display for Handle {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StreamEncoding {
     Zstd,
-    Raw,
+    None,
 }
 
 #[cfg(test)]
@@ -446,24 +333,37 @@ mod tests {
 
     use std::io::Read;
 
+    use crate::unidirectional::{
+        PipeMode, PipeRead, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
+    };
+
     use super::*;
+
+    impl UnidirectionalPipe {
+        pub fn in_process() -> Self {
+            Self::create_from_options(UniDirectionalPipeOptions {
+                encoding: StreamEncoding::None,
+                mode: PipeMode::InProcess,
+            })
+            .unwrap()
+        }
+    }
 
     #[test]
     fn test_pipe() {
-        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
-        pipe.set_handle_policy(HandlePolicy::Inclusive);
-        println!("{:?}", pipe);
-        let (mut reader, mut writer) = pipe.rw();
+        let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
+        let mut reader = read.open().unwrap();
+        let mut writer = write.open().unwrap();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
-        pipe.close_write().unwrap();
+        writer.close().unwrap();
 
         assert_eq!(written, 11);
 
         let mut buf = [0u8; 256];
 
         let read = reader.read(&mut buf).unwrap();
-        pipe.close_read().unwrap();
+        reader.close().unwrap();
 
         assert_eq!(read, 11);
         assert_eq!(&buf[..read], "hello world".as_bytes());
@@ -471,9 +371,8 @@ mod tests {
 
     #[test]
     fn test_serialized_pipe() {
-        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
-        pipe.set_handle_policy(HandlePolicy::Inclusive);
-        let mut writer = pipe.open_write();
+        let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
+        let mut writer = write.open().unwrap();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -482,11 +381,11 @@ mod tests {
         writer.close().unwrap();
 
         // serialize the pipe
-        let serialized = serde_json::to_string(&pipe).unwrap();
+        let serialized = serde_json::to_string(&read).unwrap();
         println!("{}", serialized);
         // deserialize the pipe
-        let deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
-        let mut reader = deserialized.open_read();
+        let deserialized: UnOpenedPipe<PipeRead> = serde_json::from_str(&serialized).unwrap();
+        let mut reader = deserialized.open().unwrap();
 
         let mut buf = [0u8; 11];
 
@@ -499,9 +398,8 @@ mod tests {
 
     #[test]
     fn test_pipe_in_another_thread() {
-        let mut pipe = OsPipe::create(Span::unknown()).unwrap();
-        pipe.set_handle_policy(HandlePolicy::Inclusive);
-        let mut writer = pipe.open_write();
+        let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
+        let mut writer = write.open().unwrap();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -509,12 +407,12 @@ mod tests {
         writer.close().unwrap();
 
         // serialize the pipe
-        let serialized = serde_json::to_string(&pipe).unwrap();
+        let serialized = serde_json::to_string(&read).unwrap();
         // spawn a new process
         std::thread::spawn(move || {
             // deserialize the pipe
-            let deserialized: OsPipe = serde_json::from_str(&serialized).unwrap();
-            let mut reader = deserialized.open_read();
+            let deserialized: UnOpenedPipe<PipeRead> = serde_json::from_str(&serialized).unwrap();
+            let mut reader = deserialized.open().unwrap();
 
             let mut buf = [0u8; 11];
 
@@ -528,8 +426,14 @@ mod tests {
 
     #[test]
     fn test_pipe_in_another_process() {
-        let pipe = OsPipe::create(Span::unknown()).unwrap();
-        let mut writer = pipe.open_write();
+        let UnidirectionalPipe { read, write } =
+            UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
+                encoding: StreamEncoding::None,
+                mode: PipeMode::CrossProcess,
+            })
+            .unwrap();
+
+        let mut writer = write.open().unwrap();
         // write hello world to the pipe
         let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -537,7 +441,7 @@ mod tests {
         writer.close().unwrap();
 
         // serialize the pipe
-        let serialized = serde_json::to_string(&pipe).unwrap();
+        let serialized = serde_json::to_string(&read).unwrap();
         println!("{}", serialized);
         // spawn a new process
         let res = std::process::Command::new("cargo")

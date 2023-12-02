@@ -1,4 +1,4 @@
-use nu_protocol::ShellError;
+use nu_protocol::{PipelineData, RawStream, ShellError};
 
 use crate::Handle;
 
@@ -118,6 +118,30 @@ impl std::fmt::Display for PipeError {
             PipeError::FailedSetNamedPipeHandleState(v, e) => {
                 write!(f, "Failed to set named pipe handle state {:?}: {:?}", v, e)
             }
+        }
+    }
+}
+
+pub trait MaybeRawStream {
+    fn take_stream(&mut self) -> Option<RawStream>;
+}
+
+impl MaybeRawStream for PipelineData {
+    fn take_stream(&mut self) -> Option<RawStream> {
+        match self {
+            PipelineData::Value { .. } => None,
+            PipelineData::ListStream { .. } => None,
+            PipelineData::ExternalStream { stdout, .. } => stdout.take(),
+            PipelineData::Empty => None,
+        }
+    }
+}
+
+impl MaybeRawStream for Option<PipelineData> {
+    fn take_stream(&mut self) -> Option<RawStream> {
+        match self {
+            Some(PipelineData::ExternalStream { stdout, .. }) => stdout.take(),
+            _ => None,
         }
     }
 }

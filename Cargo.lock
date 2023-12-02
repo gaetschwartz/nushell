@@ -3044,20 +3044,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "nu-plugin"
+name = "nu-pipes"
 version = "0.87.2"
 dependencies = [
- "bincode",
  "konst",
  "libc",
  "log",
  "nu-engine",
  "nu-protocol",
- "rmp-serde",
  "serde",
  "serde_json",
  "windows 0.52.0",
  "zstd 0.13.0",
+]
+
+[[package]]
+name = "nu-plugin"
+version = "0.87.2"
+dependencies = [
+ "bincode",
+ "log",
+ "nu-engine",
+ "nu-pipes",
+ "nu-protocol",
+ "rmp-serde",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

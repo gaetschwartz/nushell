@@ -1,8 +1,6 @@
-use nu_protocol::{Span, StreamDataType};
+use crate::unidirectional::PipeMode;
 
-use crate::OsPipe;
-
-use super::{Handle, PipeError};
+use super::{Handle, OsPipe, PipeError};
 
 macro_rules! function {
     () => {{
@@ -32,7 +30,7 @@ macro_rules! trace_pipe {
     );
 }
 
-pub fn create_pipe(span: Span) -> Result<OsPipe, PipeError> {
+pub(crate) fn create_pipe() -> Result<OsPipe, PipeError> {
     let mut fds: [libc::c_int; 2] = [0; 2];
     let result = unsafe { libc::pipe(fds.as_mut_ptr()) };
     if result < 0 {
@@ -40,12 +38,8 @@ pub fn create_pipe(span: Span) -> Result<OsPipe, PipeError> {
     }
 
     Ok(OsPipe {
-        span,
         read_handle: Handle::Read(fds[0]),
         write_handle: Handle::Write(fds[1]),
-        datatype: StreamDataType::Binary,
-        handle_policy: super::HandlePolicy::Exclusive,
-        encoding: super::StreamEncoding::Raw,
     })
 }
 
@@ -85,4 +79,11 @@ pub fn write_handle(handle: Handle, buf: &[u8]) -> std::io::Result<usize> {
     trace_pipe!("wrote {} bytes", result);
 
     Ok(result as usize)
+}
+
+pub(crate) fn should_close_other_for_mode(mode: PipeMode) -> bool {
+    match mode {
+        PipeMode::CrossProcess => true,
+        PipeMode::InProcess => false,
+    }
 }
