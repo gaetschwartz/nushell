@@ -57,7 +57,7 @@ pub fn close_handle(handle: Handle) -> Result<(), PipeError> {
     Ok(())
 }
 
-pub fn read_handle(handle: Handle, buf: &mut [u8]) -> std::io::Result<usize> {
+pub fn read_handle(handle: &Handle, buf: &mut [u8]) -> std::io::Result<usize> {
     trace_pipe!("{:?}", handle);
     let result = unsafe { libc::read(handle.native(), buf.as_mut_ptr() as *mut _, buf.len()) };
     if result < 0 {
@@ -68,7 +68,7 @@ pub fn read_handle(handle: Handle, buf: &mut [u8]) -> std::io::Result<usize> {
     Ok(result as usize)
 }
 
-pub fn write_handle(handle: Handle, buf: &[u8]) -> std::io::Result<usize> {
+pub fn write_handle(handle: &Handle, buf: &[u8]) -> std::io::Result<usize> {
     trace_pipe!("{:?}", handle);
 
     let result = unsafe { libc::write(handle.native(), buf.as_ptr() as *const _, buf.len()) };

@@ -17,17 +17,16 @@ pub struct UnOpenedPipe<T: HandleType> {
     handle: Handle,
     other_handle: Handle,
     pub mode: PipeMode,
-    pub type_enum: HandleTypeEnum,
     ty: T,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Pipe<T: HandleType> {
-    datatype: StreamDataType,
-    encoding: StreamEncoding,
+    pub(crate) datatype: StreamDataType,
+    pub(crate) encoding: StreamEncoding,
 
-    handle: Handle,
-    mode: PipeMode,
+    pub(crate) handle: Handle,
+    pub(crate) mode: PipeMode,
     marker: std::marker::PhantomData<T>,
 }
 
@@ -56,7 +55,6 @@ impl UnidirectionalPipe {
             handle: pipe.read_handle,
             other_handle: pipe.write_handle,
             mode: arg.mode,
-            type_enum: HandleTypeEnum::Read,
             ty: PipeRead(std::marker::PhantomData),
         };
         let wp = UnOpenedPipe {
@@ -65,7 +63,6 @@ impl UnidirectionalPipe {
             handle: pipe.write_handle,
             other_handle: pipe.read_handle,
             mode: arg.mode,
-            type_enum: HandleTypeEnum::Write,
             ty: PipeWrite(std::marker::PhantomData),
         };
         Ok(UnidirectionalPipe {
@@ -107,13 +104,26 @@ impl<T: HandleType> Pipe<T> {
 
 impl std::io::Read for Pipe<PipeRead> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        pipe_impl::read_handle(self.handle, buf)
+        pipe_impl::read_handle(&self.handle, buf)
     }
 }
-
 impl std::io::Write for Pipe<PipeWrite> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        pipe_impl::write_handle(self.handle, buf)
+        pipe_impl::write_handle(&self.handle, buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl std::io::Read for &Pipe<PipeRead> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        pipe_impl::read_handle(&self.handle, buf)
+    }
+}
+impl std::io::Write for &Pipe<PipeWrite> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        pipe_impl::write_handle(&self.handle, buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
