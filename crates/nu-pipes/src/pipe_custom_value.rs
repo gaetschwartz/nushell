@@ -2,7 +2,10 @@ use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value}
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
-use crate::unidirectional::{PipeRead, UnOpenedPipe};
+use crate::{
+    unidirectional::{PipeRead, UnOpenedPipe},
+    HandleReader,
+};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct StreamCustomValue {
@@ -60,12 +63,14 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn as_string(&self) -> Result<String, ShellError> {
-        let mut reader = self.os_pipe.open()?;
+        let pipe = self.os_pipe.open()?;
+        let mut reader = HandleReader::new(&pipe);
         let mut vec = Vec::new();
         _ = reader.read_to_end(&mut vec)?;
         let string = String::from_utf8_lossy(&vec);
 
-        reader.close()?;
+        // reader.close()?;
+        eprintln!("as_string: {}", string);
         Ok(string.to_string())
     }
 

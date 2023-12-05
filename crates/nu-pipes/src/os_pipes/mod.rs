@@ -1,4 +1,4 @@
-use std::{fmt::Debug, io::Write, thread::JoinHandle};
+use std::thread::JoinHandle;
 
 use log::trace;
 use nu_protocol::ShellError;
@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{InnerHandleType, MaybeRawStream, PipeError};
 
-use self::unidirectional::{PipeWrite, UnOpenedPipe};
+use self::unidirectional::{Pipe, PipeRead, PipeWrite, UnOpenedPipe};
 
 // pub mod bidirectional;
 pub mod unidirectional;
@@ -67,124 +67,99 @@ impl From<Handle> for InnerHandleType {
 }
 
 /// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
-pub struct HandleWriter {
-    handle: Handle,
-    writer: Box<dyn FinishableWrite<Inner = Handle>>,
-    encoding: StreamEncoding,
+pub struct HandleWriter<'p> {
+    pipe: &'p Pipe<PipeWrite>,
+    writer: Option<Box<dyn FinishableWrite<Inner = &'p Pipe<PipeWrite>> + 'p>>,
 }
 
-impl HandleWriter {
-    pub fn new(handle: Handle, encoding: StreamEncoding) -> Self {
+impl<'p> HandleWriter<'p> {
+    pub fn new<'o: 'p>(pipe: &'o Pipe<PipeWrite>) -> Self {
         Self {
-            handle,
-            encoding,
-            writer: match encoding {
-                StreamEncoding::Zstd => Box::new(Some(
-                    zstd::stream::Encoder::new(handle, ZSTD_COMPRESSION_LEVEL)
+            pipe,
+            writer: Some(match pipe.encoding() {
+                StreamEncoding::Zstd => Box::new(
+                    zstd::stream::Encoder::new(pipe, ZSTD_COMPRESSION_LEVEL)
                         .expect("failed to create zstd encoder"),
-                )),
-                StreamEncoding::None => Box::new(handle),
-            },
+                ),
+                StreamEncoding::None => Box::new(pipe),
+            }),
         }
     }
 }
 
-impl std::io::Write for HandleWriter {
+impl std::io::Write for HandleWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.writer.write(buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.flush()
-    }
-}
-
-trait FinishableWrite {
-    type Inner;
-
-    fn finish(&mut self) -> Result<Self::Inner, std::io::Error>;
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize>;
-    fn flush(&mut self) -> std::io::Result<()>;
-}
-
-impl<T: std::io::Write> FinishableWrite for Option<zstd::stream::Encoder<'_, T>> {
-    fn finish(&mut self) -> Result<T, std::io::Error> {
-        let encoder = self.take().expect("failed to take encoder");
-        zstd::stream::Encoder::finish(encoder)
-    }
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.as_mut().map_or(Ok(0), |w| w.write(buf))
+        self.writer.as_mut().map_or(
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "writer is already closed",
+            )),
+            |w| w.write(buf),
+        )
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        self.as_mut().map_or(Ok(()), |w| w.flush())
+        self.writer.as_mut().map_or(
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "writer is already closed",
+            )),
+            |w| w.flush(),
+        )
     }
-    type Inner = T;
 }
 
-impl FinishableWrite for Handle {
-    type Inner = Handle;
-    #[inline(always)]
-    fn finish(&mut self) -> Result<Handle, std::io::Error> {
-        Ok(*self)
+trait FinishableWrite: std::io::Write {
+    type Inner: Sized;
+
+    fn finish(self: Box<Self>) -> Result<(), std::io::Error>;
+}
+
+impl<'a> FinishableWrite for zstd::stream::Encoder<'a, &'a Pipe<PipeWrite>> {
+    fn finish(self: Box<Self>) -> Result<(), std::io::Error> {
+        zstd::stream::Encoder::finish(*self)?;
+        Ok(())
     }
 
-    #[inline(always)]
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        std::io::Write::write(self, buf)
-    }
+    type Inner = &'a Pipe<PipeWrite>;
+}
+
+impl<'p> FinishableWrite for &'p Pipe<PipeWrite> {
+    type Inner = &'p Pipe<PipeWrite>;
 
     #[inline(always)]
-    fn flush(&mut self) -> std::io::Result<()> {
-        std::io::Write::flush(self)
-    }
-}
-
-/// A struct representing a handle reader.
-pub struct HandleReader {
-    handle: Handle,
-    encoding: StreamEncoding,
-    reader: Box<dyn std::io::Read>,
-}
-
-impl HandleReader {
-    fn new(handle: Handle, encoding: StreamEncoding) -> Self {
-        Self {
-            handle,
-            encoding,
-            reader: match encoding {
-                StreamEncoding::Zstd => {
-                    if let Ok(decoder) = zstd::stream::Decoder::new(handle) {
-                        Box::new(decoder)
-                    } else {
-                        trace!("failed to create zstd decoder, falling back to raw");
-                        Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, handle))
-                    }
-                }
-                StreamEncoding::None => {
-                    Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, handle))
-                }
-            },
-        }
-    }
-}
-
-impl std::io::Read for Handle {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        pipe_impl::read_handle(*self, buf)
-    }
-}
-
-impl std::io::Write for Handle {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        pipe_impl::write_handle(*self, buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn finish(self: Box<Self>) -> Result<(), std::io::Error> {
         Ok(())
     }
 }
 
-impl std::io::Read for HandleReader {
+/// A struct representing a handle reader.
+pub struct HandleReader<'p> {
+    reader: Box<dyn std::io::Read + 'p>,
+    pipe: &'p Pipe<PipeRead>,
+}
+
+impl<'p> HandleReader<'p> {
+    pub fn new<'o: 'p>(pipe: &'o Pipe<PipeRead>) -> Self {
+        Self {
+            pipe,
+            reader: match pipe.encoding() {
+                StreamEncoding::Zstd => {
+                    if let Ok(decoder) = zstd::stream::Decoder::new(pipe) {
+                        Box::new(decoder)
+                    } else {
+                        eprintln!("failed to create zstd decoder, falling back to raw");
+                        Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, pipe))
+                    }
+                }
+                StreamEncoding::None => {
+                    Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, pipe))
+                }
+            },
+        }
+    }
+}
+
+impl std::io::Read for HandleReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.reader.read(buf)
     }
@@ -213,23 +188,23 @@ impl<T: HandleIO> AsNativeHandle for T {
     }
 }
 
-impl HandleIO for HandleWriter {
+impl HandleIO for HandleWriter<'_> {
     fn handle(&self) -> Handle {
-        self.handle
+        self.pipe.handle
     }
 
     fn encoding(&self) -> StreamEncoding {
-        self.encoding
+        self.pipe.encoding
     }
 }
 
-impl HandleIO for HandleReader {
+impl HandleIO for HandleReader<'_> {
     fn handle(&self) -> Handle {
-        self.handle
+        self.pipe.handle
     }
 
     fn encoding(&self) -> StreamEncoding {
-        self.encoding
+        self.pipe.encoding
     }
 }
 
@@ -238,10 +213,22 @@ pub trait Closeable: HandleIO {
     fn close(&mut self) -> Result<(), std::io::Error>;
 }
 
-impl Closeable for HandleWriter {
+impl Closeable for HandleWriter<'_> {
     fn close(&mut self) -> Result<(), std::io::Error> {
-        self.writer.finish()?;
-        self.handle.close().map_err(|e| {
+        let writer = self.writer.take();
+        match writer {
+            Some(writer) => {
+                writer.finish()?;
+            }
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "failed to close handle: writer is already closed",
+                ))
+            }
+        }
+
+        self.pipe.close().map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("failed to close handle: {:?}", e),
@@ -250,9 +237,9 @@ impl Closeable for HandleWriter {
     }
 }
 
-impl Closeable for HandleReader {
+impl Closeable for HandleReader<'_> {
     fn close(&mut self) -> Result<(), std::io::Error> {
-        self.handle.close().map_err(|e| {
+        self.pipe.close().map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("failed to close handle: {:?}", e),
@@ -271,10 +258,11 @@ impl UnOpenedPipe<PipeWrite> {
     ) -> Result<Option<JoinHandle<()>>, ShellError> {
         match input.take_stream() {
             Some(stdout) => {
-                let writer = self.open().unwrap();
+                let pipe = self.open().unwrap();
 
                 let handle = std::thread::spawn(move || {
-                    let mut writer = writer;
+                    let pipe = pipe;
+                    let mut writer = HandleWriter::new(&pipe);
                     let mut stdout = stdout;
 
                     match std::io::copy(&mut stdout, &mut writer) {
@@ -331,7 +319,7 @@ pub enum StreamEncoding {
 #[cfg(test)]
 mod tests {
 
-    use std::io::Read;
+    use std::io::{Read, Write};
 
     use crate::unidirectional::{
         PipeMode, PipeRead, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
@@ -409,19 +397,24 @@ mod tests {
         // serialize the pipe
         let serialized = serde_json::to_string(&read).unwrap();
         // spawn a new process
-        std::thread::spawn(move || {
+        let (read, buf) = std::thread::spawn(move || {
             // deserialize the pipe
             let deserialized: UnOpenedPipe<PipeRead> = serde_json::from_str(&serialized).unwrap();
             let mut reader = deserialized.open().unwrap();
 
-            let mut buf = [0u8; 11];
+            let mut buf = [0u8; 32];
 
             let read = reader.read(&mut buf).unwrap();
 
-            assert_eq!(read, 11);
-            assert_eq!(buf, "hello world".as_bytes());
             reader.close().unwrap();
-        });
+
+            (read, buf)
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(read, 11);
+        assert_eq!(&buf[..read], "hello world".as_bytes());
     }
 
     #[test]
