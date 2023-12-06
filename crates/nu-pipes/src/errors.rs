@@ -64,27 +64,3 @@ impl std::fmt::Display for PipeError {
         ShellError::from(self.clone()).fmt(f)
     }
 }
-
-pub trait MaybeRawStream {
-    fn take_stream(&mut self) -> Option<RawStream>;
-}
-
-impl MaybeRawStream for PipelineData {
-    fn take_stream(&mut self) -> Option<RawStream> {
-        match self {
-            PipelineData::Value { .. } => None,
-            PipelineData::ListStream { .. } => None,
-            PipelineData::ExternalStream { stdout, .. } => stdout.take(),
-            PipelineData::Empty => None,
-        }
-    }
-}
-
-impl MaybeRawStream for Option<PipelineData> {
-    fn take_stream(&mut self) -> Option<RawStream> {
-        match self {
-            Some(PipelineData::ExternalStream { stdout, .. }) => stdout.take(),
-            _ => None,
-        }
-    }
-}

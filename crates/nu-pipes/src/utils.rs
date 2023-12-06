@@ -1,3 +1,5 @@
+use nu_protocol::{PipelineData, RawStream};
+
 #[macro_export]
 macro_rules! function {
     () => {{
@@ -46,4 +48,28 @@ pub fn named_thread<T: 'static + Send, F: 'static + Send + FnOnce() -> T, S: Int
     f: F,
 ) -> Result<std::thread::JoinHandle<T>, std::io::Error> {
     std::thread::Builder::new().name(name.into()).spawn(f)
+}
+
+pub trait MaybeRawStream {
+    fn take_stream(&mut self) -> Option<RawStream>;
+}
+
+impl MaybeRawStream for PipelineData {
+    fn take_stream(&mut self) -> Option<RawStream> {
+        match self {
+            PipelineData::Value { .. } => None,
+            PipelineData::ListStream { .. } => None,
+            PipelineData::ExternalStream { stdout, .. } => stdout.take(),
+            PipelineData::Empty => None,
+        }
+    }
+}
+
+impl MaybeRawStream for Option<PipelineData> {
+    fn take_stream(&mut self) -> Option<RawStream> {
+        match self {
+            Some(PipelineData::ExternalStream { stdout, .. }) => stdout.take(),
+            _ => None,
+        }
+    }
 }

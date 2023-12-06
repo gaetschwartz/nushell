@@ -5,15 +5,17 @@ use crate::protocol::{
     CallInfo, CallInput, PluginCall, PluginCustomValue, PluginData, PluginResponse,
 };
 use std::path::{Path, PathBuf};
+use std::rc::Weak;
+use std::thread;
 
 use log::trace;
 use nu_pipes::unidirectional::{
-    PipeMode, UniDirectionalPipeOptions, UnidirectionalPipe,
+    Pipe, PipeMode, PipeWrite, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
 };
-use nu_pipes::StreamEncoding;
+use nu_pipes::{MaybeRawStream, StreamEncoding};
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::{ast::Call, PluginSignature, Signature};
-use nu_protocol::{Example, PipelineData, ShellError, Value};
+use nu_protocol::{Example, PipelineData, RawStream, ShellError, Value};
 
 #[doc(hidden)] // Note: not for plugin authors / only used in nu-parser
 #[derive(Clone)]
@@ -34,17 +36,20 @@ impl PluginDeclaration {
         }
     }
 
-    fn make_call_input(&self, input: PipelineData, call: &Call) -> Result<CallInput, ShellError> {
-        if let PipelineData::ExternalStream {
-            stdout: Some(_), ..
-        } = input
-        {
+    fn make_call_input(
+        &self,
+        input: PipelineData,
+        call: &Call,
+    ) -> Result<(CallInput, Option<(UnOpenedPipe<PipeWrite>, RawStream)>), ShellError> {
+        let mut input = input;
+
+        if let Some(stdout) = input.take_stream() {
             match UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
                 encoding: StreamEncoding::Zstd,
                 mode: PipeMode::CrossProcess,
             }) {
-                Ok(UnidirectionalPipe { read, write }) => {
-                    return Ok(CallInput::Pipe(read, Some((write, input))))
+                Ok(p) => {
+                    return Ok((CallInput::Pipe(p.read), Some((p.write, stdout))));
                 }
                 Err(e) => {
                     trace!("Unable to create pipe for plugin {}: {}", self.name, e);
@@ -80,7 +85,7 @@ impl PluginDeclaration {
             Value::LazyRecord { val, .. } => CallInput::Value(val.collect()?),
             value => CallInput::Value(value),
         };
-        Ok(input)
+        Ok((input, None))
     }
 }
 
@@ -139,89 +144,107 @@ impl Command for PluginDeclaration {
         let current_envs = nu_engine::env::env_to_strings(engine_state, stack).unwrap_or_default();
         plugin_cmd.envs(current_envs);
 
-        let mut call_input = self.make_call_input(input, call)?;
-
-        let mut child = plugin_cmd.spawn().map_err(|err| {
-            let decl = engine_state.get_decl(call.decl_id);
-            ShellError::GenericError {
-                error: format!("Unable to spawn plugin for {}", decl.name()),
-                msg: format!("{err}"),
-                span: Some(call.head),
-                help: None,
-                inner: vec![],
-            }
-        })?;
-
-        let join_handle = match call_input {
-            CallInput::Pipe(_, Some((ref write, ref mut pipeline))) => write.send(pipeline)?,
-            _ => None,
+        let (call_input, mut pipe) = self.make_call_input(input, call)?;
+        let (pipe, stream) = if let Some((p, s)) = pipe.take() {
+            (Some(p), Some(s))
+        } else {
+            (None, None)
         };
 
-        let plugin_call = PluginCall::CallInfo(CallInfo {
-            name: self.name.clone(),
-            call: EvaluatedCall::try_from_call(call, engine_state, stack)?,
-            input: call_input.clone(),
-        });
+        thread::scope(|s| {
+            let mut child = plugin_cmd.spawn().map_err(|err| {
+                let decl = engine_state.get_decl(call.decl_id);
+                ShellError::GenericError(
+                    format!("Unable to spawn plugin for {}", decl.name()),
+                    format!("{err}"),
+                    Some(call.head),
+                    None,
+                    Vec::new(),
+                )
+            })?;
 
-        let encoding = {
-            let stdout_reader = match &mut child.stdout {
-                Some(out) => out,
-                None => {
-                    return Err(ShellError::PluginFailedToLoad {
-                        msg: "Plugin missing stdout reader".into(),
-                    })
-                }
+            let join_handle = if let (Some(pipe), Some(stdout)) = (&pipe, stream) {
+                pipe.send(s, stdout)?
+            } else {
+                None
             };
-            get_plugin_encoding(stdout_reader)?
-        };
 
-        let response = call_plugin(&mut child, plugin_call, &encoding, call.head).map_err(|err| {
-            let decl = engine_state.get_decl(call.decl_id);
-            ShellError::GenericError {
-                error: format!("Unable to decode call for {}", decl.name()),
-                msg: err.to_string(),
-                span: Some(call.head),
-                help: None,
-                inner: vec![],
+            let plugin_call = PluginCall::CallInfo(CallInfo {
+                name: self.name.clone(),
+                call: EvaluatedCall::try_from_call(call, engine_state, stack)?,
+                input: call_input.clone(),
+            });
+
+            let encoding = {
+                let stdout_reader = match &mut child.stdout {
+                    Some(out) => out,
+                    None => {
+                        return Err(ShellError::PluginFailedToLoad {
+                            msg: "Plugin missing stdout reader".into(),
+                        })
+                    }
+                };
+                get_plugin_encoding(stdout_reader)?
+            };
+
+            let response =
+                call_plugin(&mut child, plugin_call, &encoding, call.head).map_err(|err| {
+                    let decl = engine_state.get_decl(call.decl_id);
+                    ShellError::GenericError(
+                        format!("Unable to decode call for {}", decl.name()),
+                        err.to_string(),
+                        Some(call.head),
+                        None,
+                        Vec::new(),
+                    )
+                });
+
+            let pipeline_data = match response {
+                Ok(PluginResponse::Value(value)) => {
+                    Ok(PipelineData::Value(value.as_ref().clone(), None))
+                }
+                Ok(PluginResponse::PluginData(name, plugin_data)) => Ok(PipelineData::Value(
+                    Value::custom_value(
+                        Box::new(PluginCustomValue {
+                            name,
+                            data: plugin_data.data,
+                            filename: self.filename.clone(),
+                            shell: self.shell.clone(),
+                            source: engine_state.get_decl(call.decl_id).name().to_owned(),
+                        }),
+                        plugin_data.span,
+                    ),
+                    None,
+                )),
+                Ok(PluginResponse::Error(err)) => Err(err.into()),
+                Ok(PluginResponse::Signature(..)) => Err(ShellError::GenericError(
+                    "Plugin missing value".into(),
+                    "Received a signature from plugin instead of value".into(),
+                    Some(call.head),
+                    None,
+                    Vec::new(),
+                )),
+                Err(err) => Err(err),
+            };
+
+            if let Some(join_handle) = join_handle {
+                join_handle.join().map_err(|_| {
+                    let decl = engine_state.get_decl(call.decl_id);
+                    ShellError::GenericError(
+                        format!("Unable to join thread for {}", decl.name()),
+                        "Unable to join thread".into(),
+                        Some(call.head),
+                        None,
+                        Vec::new(),
+                    )
+                })?;
             }
-        });
 
-        let pipeline_data = match response {
-            Ok(PluginResponse::Value(value)) => {
-                Ok(PipelineData::Value(value.as_ref().clone(), None))
-            }
-            Ok(PluginResponse::PluginData(name, plugin_data)) => Ok(PipelineData::Value(
-                Value::custom_value(
-                    Box::new(PluginCustomValue {
-                        name,
-                        data: plugin_data.data,
-                        filename: self.filename.clone(),
-                        shell: self.shell.clone(),
-                        source: engine_state.get_decl(call.decl_id).name().to_owned(),
-                    }),
-                    plugin_data.span,
-                ),
-                None,
-            )),
-            Ok(PluginResponse::Error(err)) => Err(err.into()),
-            Ok(PluginResponse::Signature(..)) => Err(ShellError::GenericError {
-                error: "Plugin missing value".into(),
-                msg: "Received a signature from plugin instead of value".into(),
-                span: Some(call.head),
-                help: None,
-                inner: vec![],
-            }),
-            Err(err) => Err(err),
-        };
+            // We need to call .wait() on the child, or we'll risk summoning the zombie horde
+            let _ = child.wait();
 
-        if let Some(join_handle) = join_handle {
-            _ = join_handle.join();
-        }
-
-        // We need to call .wait() on the child, or we'll risk summoning the zombie horde
-        let _ = child.wait();
-
-        pipeline_data
+            pipeline_data
+        })
     }
 
     fn is_plugin(&self) -> Option<(&Path, Option<&Path>)> {

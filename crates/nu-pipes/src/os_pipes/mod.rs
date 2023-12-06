@@ -2,22 +2,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{PipeError, PipeResult};
 
-use self::{
-    pipe_impl::InnerHandleType,
-    unidirectional::{Pipe, PipeMode, PipeRead, PipeWrite},
-};
+use self::{pipe_impl::InnerHandleType, unidirectional::PipeMode};
 
 // pub mod bidirectional;
+mod io;
 pub mod unidirectional;
+
+pub use io::*;
 
 #[cfg_attr(windows, path = "windows.rs")]
 #[cfg_attr(unix, path = "unix.rs")]
 mod pipe_impl;
 
 pub use pipe_impl::OSError;
-
-const BUFFER_CAPACITY: usize = 16 * 1024 * 1024;
-const ZSTD_COMPRESSION_LEVEL: i32 = 0;
 
 trait PipeImplBase {
     fn create_pipe() -> Result<OsPipe, PipeError>;
@@ -79,105 +76,6 @@ impl From<Handle> for InnerHandleType {
     }
 }
 
-/// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
-pub struct HandleWriter<'p> {
-    pipe: &'p Pipe<PipeWrite>,
-    writer: Option<Box<dyn FinishableWrite<Inner = &'p Pipe<PipeWrite>> + 'p>>,
-}
-
-impl<'p> HandleWriter<'p> {
-    pub fn new<'o: 'p>(pipe: &'o Pipe<PipeWrite>) -> Self {
-        Self {
-            pipe,
-            writer: Some(match pipe.encoding() {
-                StreamEncoding::Zstd => Box::new(
-                    zstd::stream::Encoder::new(pipe, ZSTD_COMPRESSION_LEVEL)
-                        .expect("failed to create zstd encoder"),
-                ),
-                StreamEncoding::None => Box::new(pipe),
-            }),
-        }
-    }
-}
-
-impl std::io::Write for HandleWriter<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.writer.as_mut().map_or(
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "writer is already closed",
-            )),
-            |w| w.write(buf),
-        )
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.as_mut().map_or(
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "writer is already closed",
-            )),
-            |w| w.flush(),
-        )
-    }
-}
-
-trait FinishableWrite: std::io::Write {
-    type Inner: Sized;
-
-    fn finish(self: Box<Self>) -> Result<(), std::io::Error>;
-}
-
-impl<'a> FinishableWrite for zstd::stream::Encoder<'a, &'a Pipe<PipeWrite>> {
-    fn finish(self: Box<Self>) -> Result<(), std::io::Error> {
-        zstd::stream::Encoder::finish(*self)?;
-        Ok(())
-    }
-
-    type Inner = &'a Pipe<PipeWrite>;
-}
-
-impl<'p> FinishableWrite for &'p Pipe<PipeWrite> {
-    type Inner = &'p Pipe<PipeWrite>;
-
-    #[inline(always)]
-    fn finish(self: Box<Self>) -> Result<(), std::io::Error> {
-        Ok(())
-    }
-}
-
-/// A struct representing a handle reader.
-pub struct HandleReader<'p> {
-    reader: Box<dyn std::io::Read + 'p>,
-    pipe: &'p Pipe<PipeRead>,
-}
-
-impl<'p> HandleReader<'p> {
-    pub fn new<'o: 'p>(pipe: &'o Pipe<PipeRead>) -> Self {
-        Self {
-            pipe,
-            reader: match pipe.encoding() {
-                StreamEncoding::Zstd => {
-                    if let Ok(decoder) = zstd::stream::Decoder::new(pipe) {
-                        Box::new(decoder)
-                    } else {
-                        eprintln!("failed to create zstd decoder, falling back to raw");
-                        Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, pipe))
-                    }
-                }
-                StreamEncoding::None => {
-                    Box::new(std::io::BufReader::with_capacity(BUFFER_CAPACITY, pipe))
-                }
-            },
-        }
-    }
-}
-
-impl std::io::Read for HandleReader<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.reader.read(buf)
-    }
-}
-
 pub trait HandleIO {
     /// Returns the handle of the object.
     fn handle(&self) -> Handle;
@@ -224,41 +122,6 @@ impl HandleIO for HandleReader<'_> {
 pub trait Closeable: HandleIO {
     /// Closes the object.
     fn close(&mut self) -> Result<(), std::io::Error>;
-}
-
-impl Closeable for HandleWriter<'_> {
-    fn close(&mut self) -> Result<(), std::io::Error> {
-        let writer = self.writer.take();
-        match writer {
-            Some(writer) => {
-                writer.finish()?;
-            }
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "failed to close handle: writer is already closed",
-                ))
-            }
-        }
-
-        self.pipe.close().map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed to close handle: {:?}", e),
-            )
-        })
-    }
-}
-
-impl Closeable for HandleReader<'_> {
-    fn close(&mut self) -> Result<(), std::io::Error> {
-        self.pipe.close().map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed to close handle: {:?}", e),
-            )
-        })
-    }
 }
 
 impl std::fmt::Display for Handle {

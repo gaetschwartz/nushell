@@ -8,3 +8,4 @@ use errors::*;
 pub use os_pipes::*;
 pub use pipe_custom_value::*;
 pub use serve::*;
+pub use utils::MaybeRawStream;

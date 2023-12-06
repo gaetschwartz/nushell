@@ -7,7 +7,7 @@ use nu_pipes::{
     unidirectional::{
         PipeMode, PipeRead, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
     },
-    utils, StreamEncoding,
+    utils, Closeable, StreamEncoding,
 };
 
 trait TestPipeExt {
