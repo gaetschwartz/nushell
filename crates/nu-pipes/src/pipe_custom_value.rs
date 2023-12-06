@@ -63,8 +63,7 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn as_string(&self) -> Result<String, ShellError> {
-        let pipe = self.os_pipe.open()?;
-        let mut reader = HandleReader::new(&pipe);
+        let mut reader = self.os_pipe.open()?;
         let mut vec = Vec::new();
         _ = reader.read_to_end(&mut vec)?;
         let string = String::from_utf8_lossy(&vec);

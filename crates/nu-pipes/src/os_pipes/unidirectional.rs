@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     os_pipes::{pipe_impl, PipeImplBase},
-    Handle, HandleTypeEnum, PipeError, StreamEncoding,
+    Handle, HandleReader, HandleTypeEnum, HandleWriter, PipeError, StreamEncoding,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -33,6 +33,7 @@ pub struct Pipe<T: HandleType> {
     marker: std::marker::PhantomData<T>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct UnidirectionalPipe {
     pub read: UnOpenedPipe<PipeRead>,
     pub write: UnOpenedPipe<PipeWrite>,
@@ -75,19 +76,48 @@ impl UnidirectionalPipe {
     }
 }
 
-impl<T: HandleType> UnOpenedPipe<T> {
-    pub fn open(&self) -> Result<Pipe<T>, PipeError> {
+pub trait HandleIO<T: HandleType> {
+    fn get_pipe(&self) -> &Pipe<T>;
+}
+
+trait OpenablePipe {
+    type Inner: Sized;
+    fn open(&self) -> Result<Self::Inner, PipeError>;
+}
+
+impl UnOpenedPipe<PipeRead> {
+    pub fn open(&self) -> Result<HandleReader, PipeError> {
         if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
             pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
         }
-        Ok(Pipe {
+        let pipe = Pipe {
             datatype: self.datatype,
             encoding: self.encoding,
             handle: self.handle,
             mode: self.mode,
             marker: std::marker::PhantomData,
-        })
+        };
+
+        Ok(HandleReader::new(pipe))
+    }
+}
+impl UnOpenedPipe<PipeWrite> {
+    pub fn open(&self) -> Result<HandleWriter<'_>, PipeError> {
+        if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
+            // close both their ends of the pipe in our process
+            pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
+        }
+
+        let pipe = Pipe {
+            datatype: self.datatype,
+            encoding: self.encoding,
+            handle: self.handle,
+            mode: self.mode,
+            marker: std::marker::PhantomData,
+        };
+
+        Ok(HandleWriter::new(pipe))
     }
 }
 

@@ -16,24 +16,11 @@ pub struct CallInfo {
     pub input: CallInput,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum CallInput {
     Value(Value),
     Data(PluginData),
-    Pipe(
-        UnOpenedPipe<PipeRead>,
-        #[serde(skip, default)] Option<(UnOpenedPipe<PipeWrite>, PipelineData)>,
-    ),
-}
-
-impl Clone for CallInput {
-    fn clone(&self) -> Self {
-        match self {
-            CallInput::Value(v) => CallInput::Value(v.clone()),
-            CallInput::Data(d) => CallInput::Data(d.clone()),
-            CallInput::Pipe(rp, _) => CallInput::Pipe(rp.clone(), None),
-        }
-    }
+    Pipe(UnOpenedPipe<PipeRead>),
 }
 
 // Information sent to the plugin
