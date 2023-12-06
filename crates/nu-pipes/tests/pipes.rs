@@ -24,6 +24,21 @@ impl TestPipeExt for UnidirectionalPipe {
     }
 }
 
+trait ReadAsString {
+    fn read_as_string(&mut self) -> Result<String, std::io::Error>;
+}
+
+impl<R: Read> ReadAsString for R {
+    fn read_as_string(&mut self) -> Result<String, std::io::Error> {
+        let mut buf = String::new();
+        self.read_to_string(&mut buf).map(|_| buf)
+    }
+}
+
+fn as_string(r: Option<impl Read>) -> String {
+    r.map(|mut s| s.read_as_string().unwrap())
+        .unwrap_or("None".to_string())
+}
 #[test]
 fn test_pipe() {
     let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
@@ -107,23 +122,6 @@ fn pipe_in_another_thread() {
 
 #[test]
 fn test_pipe_in_another_process() {
-    let UnidirectionalPipe { read, write } =
-        UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
-            encoding: StreamEncoding::None,
-            mode: PipeMode::CrossProcess,
-        })
-        .unwrap();
-
-    let mut writer = write.open().unwrap();
-    // write hello world to the pipe
-    let written = writer.write("hello world".as_bytes()).unwrap();
-
-    assert_eq!(written, 11);
-    writer.close().unwrap();
-
-    // serialize the pipe
-    let serialized = serde_json::to_string(&read).unwrap();
-    println!("{}", serialized);
     println!("Compiling pipe_echoer...");
     const BINARY_NAME: &str = "pipe_echoer";
 
@@ -138,23 +136,44 @@ fn test_pipe_in_another_process() {
         .wait()
         .unwrap();
 
+    let UnidirectionalPipe { read, write } =
+        UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
+            encoding: StreamEncoding::None,
+            mode: PipeMode::CrossProcess,
+        })
+        .unwrap();
+
+    println!("read: {:?}", read);
+    println!("write: {:?}", write);
+
+    // serialize the pipe
+    let serialized = serde_json::to_string(&read).unwrap();
+    println!("{}", serialized);
+
     println!("Running pipe_echoer...");
+    let mut writer = write.open().unwrap();
+    // write hello world to the pipe
+    let written = writer.write("hello world".as_bytes()).unwrap();
+    assert_eq!(written, 11);
+
     // spawn a new process
-    let res = Command::new("cargo")
+    let mut res = Command::new("cargo")
         .arg("run")
         .arg("--bin")
         .arg(BINARY_NAME)
         .arg(serialized)
-        .output()
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
         .unwrap();
 
-    if !res.status.success() {
-        panic!("stderr: {}", String::from_utf8_lossy(res.stderr.as_slice()));
+    writer.close().unwrap();
+
+    let code = res.wait().unwrap();
+
+    if !code.success() {
+        panic!("stderr: {}", as_string(res.stderr.take()));
     }
 
-    assert!(res.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(res.stdout.as_slice()),
-        "hello world\n"
-    );
+    assert_eq!(as_string(res.stdout.take()), "hello world\n");
 }
