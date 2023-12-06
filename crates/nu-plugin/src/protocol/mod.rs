@@ -3,8 +3,8 @@ mod plugin_custom_value;
 mod plugin_data;
 
 pub use evaluated_call::EvaluatedCall;
-use nu_pipes::unidirectional::{PipeRead, PipeWrite, UnOpenedPipe};
-use nu_protocol::{PipelineData, PluginSignature, ShellError, Span, Value};
+use nu_pipes::unidirectional::{PipeRead, UnOpenedPipe};
+use nu_protocol::{PluginSignature, ShellError, Span, Value};
 pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
 use serde::{Deserialize, Serialize};

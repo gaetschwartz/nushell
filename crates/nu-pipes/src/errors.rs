@@ -1,4 +1,4 @@
-use nu_protocol::{PipelineData, RawStream, ShellError};
+use nu_protocol::ShellError;
 
 use crate::{Handle, OSError};
 

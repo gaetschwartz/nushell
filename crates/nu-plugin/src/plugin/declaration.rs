@@ -5,12 +5,12 @@ use crate::protocol::{
     CallInfo, CallInput, PluginCall, PluginCustomValue, PluginData, PluginResponse,
 };
 use std::path::{Path, PathBuf};
-use std::rc::Weak;
+
 use std::thread;
 
 use log::trace;
 use nu_pipes::unidirectional::{
-    Pipe, PipeMode, PipeWrite, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
+    PipeMode, PipeWrite, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
 };
 use nu_pipes::{MaybeRawStream, StreamEncoding};
 use nu_protocol::engine::{Command, EngineState, Stack};
@@ -26,6 +26,8 @@ pub struct PluginDeclaration {
     shell: Option<PathBuf>,
 }
 
+type OptPipeData = Option<(UnOpenedPipe<PipeWrite>, RawStream)>;
+
 impl PluginDeclaration {
     pub fn new(filename: PathBuf, signature: PluginSignature, shell: Option<PathBuf>) -> Self {
         Self {
@@ -40,7 +42,7 @@ impl PluginDeclaration {
         &self,
         input: PipelineData,
         call: &Call,
-    ) -> Result<(CallInput, Option<(UnOpenedPipe<PipeWrite>, RawStream)>), ShellError> {
+    ) -> Result<(CallInput, OptPipeData), ShellError> {
         let mut input = input;
 
         if let Some(stdout) = input.take_stream() {

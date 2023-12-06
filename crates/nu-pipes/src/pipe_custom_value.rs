@@ -4,7 +4,6 @@ use std::io::Read;
 
 use crate::{
     unidirectional::{PipeRead, UnOpenedPipe},
-    HandleReader,
 };
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]

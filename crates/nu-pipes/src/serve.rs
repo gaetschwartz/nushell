@@ -1,12 +1,12 @@
-use std::thread::{JoinHandle, ScopedJoinHandle};
-use std::{sync::mpsc, thread::Scope};
+use std::thread::Scope;
+use std::thread::ScopedJoinHandle;
 
 use log::trace;
 use nu_protocol::{RawStream, ShellError};
 
 use crate::{
-    unidirectional::{Pipe, PipeWrite, UnOpenedPipe},
-    Closeable, HandleWriter,
+    unidirectional::{PipeWrite, UnOpenedPipe},
+    Closeable,
 };
 
 // pub struct BetterThread<'p, I: Send, T: Send, R: Send, F: FnOnce(Option<I>) -> R + Send> {
