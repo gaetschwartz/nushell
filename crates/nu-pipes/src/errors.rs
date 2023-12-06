@@ -2,14 +2,7 @@ use nu_protocol::ShellError;
 
 use crate::{Handle, OSError};
 
-#[cfg(unix)]
-impl From<std::io::Error> for OSError {
-    fn from(error: std::io::Error) -> Self {
-        OSError(error)
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PipeError {
     UnexpectedInvalidPipeHandle,
     FailedToCreatePipe(OSError),
@@ -61,6 +54,24 @@ impl From<PipeError> for ShellError {
 
 impl std::fmt::Display for PipeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        ShellError::from(self.clone()).fmt(f)
+        match self {
+            PipeError::UnexpectedInvalidPipeHandle => write!(f, "Unexpected invalid pipe handle"),
+            PipeError::FailedToCreatePipe(error) => {
+                write!(f, "Failed to create pipe: {}", error)
+            }
+            PipeError::UnsupportedPlatform => write!(f, "Unsupported platform for pipes"),
+            PipeError::FailedToCloseHandle(v, e) => {
+                write!(f, "Failed to close pipe handle {:?}: {}", v, e)
+            }
+            PipeError::FailedToRead(v, e) => {
+                write!(f, "Failed to read from pipe {:?}: {}", v, e)
+            }
+            PipeError::FailedToWrite(v, e) => {
+                write!(f, "Failed to write to pipe {:?}: {}", v, e)
+            }
+            PipeError::FailedSetNamedPipeHandleState(v, e) => {
+                write!(f, "Failed to set named pipe handle state {:?}: {:?}", v, e)
+            }
+        }
     }
 }

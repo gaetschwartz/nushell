@@ -33,12 +33,12 @@ pub(crate) fn exec_name() -> String {
 macro_rules! trace_pipe {
     // use eprintln to print "exec_name | function_name:line_number: a log event"
     ($($arg:tt)+) => (
-        if $crate::trace_pipes_enabled() {
+        if $crate::utils::trace_pipes_enabled() {
             eprintln!("{} | {}: {}", std::path::PathBuf::from(std::env::args().next().unwrap_or_default())
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
-            .to_string(), function!(), format!($($arg)+))
+            .to_string(), $crate::function!(), format!($($arg)+))
         }
     );
 }
