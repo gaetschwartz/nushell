@@ -1,7 +1,10 @@
 use nu_protocol::StreamDataType;
 use serde::{Deserialize, Serialize};
 
-use crate::{pipe_impl, Handle, HandleTypeEnum, PipeError, StreamEncoding};
+use crate::{
+    os_pipes::{pipe_impl, PipeImplBase},
+    Handle, HandleTypeEnum, PipeError, StreamEncoding,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PipeDirection {
@@ -45,7 +48,7 @@ impl UnidirectionalPipe {
     pub fn create_from_options(
         arg: UniDirectionalPipeOptions,
     ) -> Result<UnidirectionalPipe, PipeError> {
-        let pipe = pipe_impl::create_pipe()?;
+        let pipe = pipe_impl::PipeImpl::create_pipe()?;
         assert!(pipe.write_handle.1 == HandleTypeEnum::Write);
         assert!(pipe.read_handle.1 == HandleTypeEnum::Read);
 
@@ -74,9 +77,9 @@ impl UnidirectionalPipe {
 
 impl<T: HandleType> UnOpenedPipe<T> {
     pub fn open(&self) -> Result<Pipe<T>, PipeError> {
-        if pipe_impl::should_close_other_for_mode(self.mode) {
+        if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
-            pipe_impl::close_handle(self.other_handle)?;
+            pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
         }
         Ok(Pipe {
             datatype: self.datatype,
@@ -90,7 +93,7 @@ impl<T: HandleType> UnOpenedPipe<T> {
 
 impl<T: HandleType> Pipe<T> {
     pub fn close(&self) -> Result<(), PipeError> {
-        pipe_impl::close_handle(self.handle)
+        pipe_impl::PipeImpl::close_handle(&self.handle)
     }
 
     pub fn encoding(&self) -> StreamEncoding {
@@ -104,12 +107,12 @@ impl<T: HandleType> Pipe<T> {
 
 impl std::io::Read for Pipe<PipeRead> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        pipe_impl::read_handle(&self.handle, buf)
+        Ok(pipe_impl::PipeImpl::read_handle(&self.handle, buf)?)
     }
 }
 impl std::io::Write for Pipe<PipeWrite> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        pipe_impl::write_handle(&self.handle, buf)
+        Ok(pipe_impl::PipeImpl::write_handle(&self.handle, buf)?)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -118,12 +121,12 @@ impl std::io::Write for Pipe<PipeWrite> {
 }
 impl std::io::Read for &Pipe<PipeRead> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        pipe_impl::read_handle(&self.handle, buf)
+        Ok(pipe_impl::PipeImpl::read_handle(&self.handle, buf)?)
     }
 }
 impl std::io::Write for &Pipe<PipeWrite> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        pipe_impl::write_handle(&self.handle, buf)
+        Ok(pipe_impl::PipeImpl::write_handle(&self.handle, buf)?)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -136,65 +139,61 @@ pub struct PipeRead(std::marker::PhantomData<()>);
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PipeWrite(std::marker::PhantomData<()>);
 
-pub trait HandleType {}
-
-impl HandleType for PipeRead {}
-impl HandleType for PipeWrite {}
-
-impl Serialize for PipeRead {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str("PipeRead")
-    }
-}
-impl Serialize for PipeWrite {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str("PipeWrite")
-    }
+pub trait HandleType {
+    const NAME: &'static str;
 }
 
-impl<'de> Deserialize<'de> for PipeRead {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct PipeReadVisitor;
-        impl serde::de::Visitor<'_> for PipeReadVisitor {
-            type Value = PipeRead;
+impl HandleType for PipeRead {
+    const NAME: &'static str = "read";
+}
+impl HandleType for PipeWrite {
+    const NAME: &'static str = "write";
+}
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("PipeRead")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<PipeRead, E> {
-                if value == "PipeRead" {
-                    Ok(PipeRead(std::marker::PhantomData))
-                } else {
-                    Err(E::custom(format!("expected PipeRead, got {}", value)))
-                }
+macro_rules! impl_serialize_deserialize {
+    ($type:ty) => {
+        impl $type {
+            fn new() -> Self {
+                Self(std::marker::PhantomData)
             }
         }
-        d.deserialize_str(PipeReadVisitor)
-    }
-}
 
-impl<'de> Deserialize<'de> for PipeWrite {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct PipeWriteVisitor;
-        impl serde::de::Visitor<'_> for PipeWriteVisitor {
-            type Value = PipeWrite;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("PipeWrite")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<PipeWrite, E> {
-                if value == "PipeWrite" {
-                    Ok(PipeWrite(std::marker::PhantomData))
-                } else {
-                    Err(E::custom(format!("expected PipeWrite, got {}", value)))
-                }
+        impl Serialize for $type {
+            fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                s.serialize_str(<$type>::NAME)
             }
         }
-        d.deserialize_str(PipeWriteVisitor)
-    }
+
+        impl<'de> Deserialize<'de> for $type {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                struct Visitor;
+                impl serde::de::Visitor<'_> for Visitor {
+                    type Value = $type;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        formatter.write_str(<$type>::NAME)
+                    }
+
+                    fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<$type, E> {
+                        if value == <$type>::NAME {
+                            Ok(<$type>::new())
+                        } else {
+                            Err(E::custom(format!(
+                                "expected {}, got {}",
+                                <$type>::NAME,
+                                value
+                            )))
+                        }
+                    }
+                }
+                d.deserialize_str(Visitor)
+            }
+        }
+    };
 }
+
+impl_serialize_deserialize!(PipeRead);
+impl_serialize_deserialize!(PipeWrite);
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PipeMode {

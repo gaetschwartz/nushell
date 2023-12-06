@@ -2,33 +2,9 @@ use crate::unidirectional::PipeMode;
 
 use super::{Handle, OsPipe, PipeError};
 
-macro_rules! function {
-    () => {{
-        fn f() {}
-        fn type_name_of<T>(_: T) -> &'static str {
-            std::any::type_name::<T>()
-        }
-        let name = type_name_of(f);
-        name.strip_suffix("::f")
-            .unwrap()
-            .split("::")
-            .last()
-            .unwrap()
-    }};
-}
+pub type InnerHandleType = libc::c_int;
 
-macro_rules! trace_pipe {
-    // use eprintln to print "exec_name | function_name:line_number: a log event"
-    ($($arg:tt)+) => (
-        if option_env!("NU_TRACE_PIPE").is_some() {
-            eprintln!("{} | {}: {}", std::path::PathBuf::from(std::env::args().next().unwrap_or_default())
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string(), function!(), format!($($arg)+))
-        }
-    );
-}
+pub type OSError = std::io::Error;
 
 pub(crate) fn create_pipe() -> Result<OsPipe, PipeError> {
     let mut fds: [libc::c_int; 2] = [0; 2];
@@ -43,7 +19,7 @@ pub(crate) fn create_pipe() -> Result<OsPipe, PipeError> {
     })
 }
 
-pub fn close_handle(handle: Handle) -> Result<(), PipeError> {
+pub fn close_handle(handle: &Handle) -> Result<(), PipeError> {
     trace_pipe!("{:?}", handle);
     let res = unsafe { libc::close(handle.native()) };
 
