@@ -3062,6 +3062,7 @@ dependencies = [
  "log",
  "nu-engine",
  "nu-protocol",
+ "num_cpus",
  "serde",
  "serde_json",
  "windows 0.52.0",

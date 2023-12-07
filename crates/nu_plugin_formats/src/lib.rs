@@ -34,9 +34,16 @@ impl Plugin for FromCmds {
                 .input_output_types(vec![(Type::String, Type::Record(vec![]))])
                 .usage("Parse text as .ini and create table.")
                 .plugin_examples(ini::examples())
-                .category(Category::Formats)
-                .supports_pipelined_input(true),
+                .category(Category::Formats),
         ]
+        .into_iter()
+        .flat_map(|v| {
+            let mut v2 = v.clone().supports_pipelined_input(true);
+            v2.sig.name = format!("{} piped", v2.sig.name);
+
+            vec![v, v2]
+        })
+        .collect()
     }
 
     fn run(
@@ -45,7 +52,23 @@ impl Plugin for FromCmds {
         call: &EvaluatedCall,
         input: PluginPipelineData,
     ) -> Result<Value, LabeledError> {
-        match name {
+        let mut split = name.split(' ');
+        let name =
+            split.next().unwrap_or_default().to_owned() + " " + split.next().unwrap_or_default();
+
+        if !matches!(
+            (split.next(), &input),
+            (Some("piped"), PluginPipelineData::ExternalStream(_))
+                | (None, PluginPipelineData::Value(_))
+        ) {
+            return Err(LabeledError {
+            label: "Plugin call with wrong name signature".into(),
+            msg: "the signature used to call the plugin does not match any name in the plugin signature vector".into(),
+            span: Some(call.head),
+        });
+        }
+
+        match name.as_str() {
             eml::CMD_NAME => eml::from_eml_call(call, &input.into_value()),
             ics::CMD_NAME => ics::from_ics_call(call, &input.into_value()),
             vcf::CMD_NAME => vcf::from_vcf_call(call, &input.into_value()),
