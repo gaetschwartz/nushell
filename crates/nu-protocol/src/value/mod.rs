@@ -235,7 +235,6 @@ impl Value {
     pub fn as_bool(&self) -> Result<bool, ShellError> {
         match self {
             Value::Bool { val, .. } => Ok(*val),
-            Value::CustomValue { val, .. } => val.as_bool(),
             x => Err(ShellError::CantConvert {
                 to_type: "boolean".into(),
                 from_type: x.get_type().to_string(),
@@ -367,6 +366,7 @@ impl Value {
                     })
                 }
             }),
+            Value::CustomValue { val, .. } => val.as_spanned_string(),
             x => Err(ShellError::CantConvert {
                 to_type: "string".into(),
                 from_type: x.get_type().to_string(),
@@ -464,6 +464,7 @@ impl Value {
         match self {
             Value::Binary { val, .. } => Ok(val),
             Value::String { val, .. } => Ok(val.as_bytes()),
+            Value::CustomValue { val, .. } => val.as_binary(),
             x => Err(ShellError::CantConvert {
                 to_type: "binary".into(),
                 from_type: x.get_type().to_string(),

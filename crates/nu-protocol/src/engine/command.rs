@@ -96,6 +96,11 @@ pub trait Command: Send + Sync + CommandClone {
         None
     }
 
+    // Whether the plugin supports pipelined input, only applicable to plugin commands
+    fn supports_pipelined_input(&self) -> bool {
+        false
+    }
+
     // Whether can run in const evaluation in the parser
     fn is_const(&self) -> bool {
         false

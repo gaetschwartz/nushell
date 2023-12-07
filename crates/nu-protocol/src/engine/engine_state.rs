@@ -494,7 +494,8 @@ impl EngineState {
                             result: eg.result,
                         })
                         .collect();
-                    let sig_with_examples = PluginSignature::new(sig, examples);
+                    let sig_with_examples =
+                        PluginSignature::new(sig, examples, decl.supports_pipelined_input());
                     serde_json::to_string_pretty(&sig_with_examples)
                         .map(|signature| {
                             // Extracting the possible path to the shell used to load the plugin

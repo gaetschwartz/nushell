@@ -1,5 +1,5 @@
 use crate::Query;
-use nu_plugin::{EvaluatedCall, LabeledError, Plugin};
+use nu_plugin::{EvaluatedCall, LabeledError, Plugin, PluginPipelineData};
 use nu_protocol::{Category, PluginExample, PluginSignature, Spanned, SyntaxShape, Value};
 
 impl Plugin for Query {
@@ -49,10 +49,12 @@ impl Plugin for Query {
         &mut self,
         name: &str,
         call: &EvaluatedCall,
-        input: &Value,
+        input: PluginPipelineData,
     ) -> Result<Value, LabeledError> {
         // You can use the name to identify what plugin signature was called
         let path: Option<Spanned<String>> = call.opt(0)?;
+
+        let input = &input.into_value();
 
         match name {
             "query" => {

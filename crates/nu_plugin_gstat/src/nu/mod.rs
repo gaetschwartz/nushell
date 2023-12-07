@@ -1,5 +1,5 @@
 use crate::GStat;
-use nu_plugin::{EvaluatedCall, LabeledError, Plugin};
+use nu_plugin::{EvaluatedCall, LabeledError, Plugin, PluginPipelineData};
 use nu_protocol::{Category, PluginSignature, Spanned, SyntaxShape, Value};
 
 impl Plugin for GStat {
@@ -14,7 +14,7 @@ impl Plugin for GStat {
         &mut self,
         name: &str,
         call: &EvaluatedCall,
-        input: &Value,
+        input: PluginPipelineData,
     ) -> Result<Value, LabeledError> {
         if name != "gstat" {
             return Ok(Value::nothing(call.head));
@@ -22,6 +22,6 @@ impl Plugin for GStat {
 
         let repo_path: Option<Spanned<String>> = call.opt(0)?;
         // eprintln!("input value: {:#?}", &input);
-        self.gstat(input, repo_path, call.head)
+        self.gstat(&input.into_value(), repo_path, call.head)
     }
 }

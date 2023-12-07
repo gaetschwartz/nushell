@@ -1,26 +1,30 @@
 use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::{io::Read, sync::OnceLock};
 
-use crate::{
-    unidirectional::{PipeRead, UnOpenedPipe},
-};
+use crate::unidirectional::{PipeRead, UnOpenedPipe};
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct StreamCustomValue {
     pub span: Span,
     pub os_pipe: UnOpenedPipe<PipeRead>,
+    #[serde(skip, default)]
+    pub cell: OnceLock<Vec<u8>>,
 }
 
 impl StreamCustomValue {
     pub fn new(os_pipe: UnOpenedPipe<PipeRead>, span: Span) -> Self {
-        Self { span, os_pipe }
+        Self {
+            span,
+            os_pipe,
+            cell: OnceLock::new(),
+        }
     }
 }
 
 impl CustomValue for StreamCustomValue {
     fn clone_value(&self, span: Span) -> Value {
-        Value::custom_value(Box::new(self.clone()), span)
+        Value::custom_value(Box::new(Self::new(self.os_pipe.clone(), span)), span)
     }
 
     fn value_string(&self) -> String {
@@ -62,13 +66,9 @@ impl CustomValue for StreamCustomValue {
     }
 
     fn as_string(&self) -> Result<String, ShellError> {
-        let mut reader = self.os_pipe.open()?;
-        let mut vec = Vec::new();
-        _ = reader.read_to_end(&mut vec)?;
-        let string = String::from_utf8_lossy(&vec);
+        let vec = self.as_binary()?;
+        let string = String::from_utf8_lossy(vec);
 
-        // reader.close()?;
-        eprintln!("as_string: {}", string);
         Ok(string.to_string())
     }
 
@@ -77,5 +77,28 @@ impl CustomValue for StreamCustomValue {
             item: self.as_string()?,
             span: self.span,
         })
+    }
+
+    fn as_binary(&self) -> Result<&[u8], ShellError> {
+        if let Some(cell) = self.cell.get() {
+            return Ok(cell.as_slice());
+        }
+
+        let mut reader = self.os_pipe.open()?;
+        let mut vec = Vec::new();
+
+        _ = reader.read_to_end(&mut vec)?;
+
+        self.cell.set(vec).map_err(|_| {
+            ShellError::GenericError(
+                "Failed to read binary data from pipe".to_string(),
+                " ".to_string(),
+                None,
+                None,
+                vec![],
+            )
+        })?;
+
+        Ok(self.cell.get().unwrap().as_slice())
     }
 }

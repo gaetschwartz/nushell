@@ -10,11 +10,21 @@ use crate::{BlockId, Category, Flag, PositionalArg, SyntaxShape, Type};
 pub struct PluginSignature {
     pub sig: Signature,
     pub examples: Vec<PluginExample>,
+    #[serde(default)]
+    pub supports_pipelined_input: bool,
 }
 
 impl PluginSignature {
-    pub fn new(sig: Signature, examples: Vec<PluginExample>) -> Self {
-        Self { sig, examples }
+    pub fn new(
+        sig: Signature,
+        examples: Vec<PluginExample>,
+        supports_pipelined_input: bool,
+    ) -> PluginSignature {
+        Self {
+            sig,
+            examples,
+            supports_pipelined_input,
+        }
     }
 
     /// Add a default help option to a signature
@@ -26,7 +36,7 @@ impl PluginSignature {
     /// Build an internal signature with default help option
     pub fn build(name: impl Into<String>) -> PluginSignature {
         let sig = Signature::new(name.into()).add_help();
-        Self::new(sig, vec![])
+        Self::new(sig, vec![], false)
     }
 
     /// Add a description to the signature
@@ -222,5 +232,15 @@ impl PluginSignature {
     pub fn plugin_examples(mut self, examples: Vec<PluginExample>) -> PluginSignature {
         self.examples = examples;
         self
+    }
+
+    /// Indicates whether the command supports pipelined input
+    pub fn supports_pipelined_input(mut self, supports: bool) -> PluginSignature {
+        self.supports_pipelined_input = supports;
+        self
+    }
+
+    pub fn get_supports_pipelined_input(&self) -> bool {
+        self.supports_pipelined_input
     }
 }
