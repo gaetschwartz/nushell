@@ -98,6 +98,9 @@ impl<'a> UnOpenedPipe<PipeWrite> {
     {
         let handle = scope.spawn(move || {
             let mut writer = self.open().unwrap();
+            if let Some(size) = stdout.known_size {
+                _ = writer.set_pledged_src_size(Some(size));
+            }
             let mut stdout = stdout;
 
             match std::io::copy(&mut stdout, &mut writer) {

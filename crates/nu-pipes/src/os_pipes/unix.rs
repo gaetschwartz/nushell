@@ -69,9 +69,6 @@ impl PipeImplBase for UnixPipeImpl {
     }
 
     fn should_close_other_for_mode(mode: PipeMode) -> bool {
-        match mode {
-            PipeMode::CrossProcess => true,
-            PipeMode::InProcess => false,
-        }
+        false
     }
 }

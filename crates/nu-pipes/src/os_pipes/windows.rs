@@ -12,7 +12,7 @@ use windows::{
     },
 };
 
-use crate::{unidirectional::PipeMode, Handle, OsPipe, PipeResult};
+use crate::{trace_pipe, unidirectional::PipeMode, Handle, OsPipe, PipeResult};
 
 use super::{PipeError, PipeImplBase};
 
@@ -78,13 +78,13 @@ impl PipeImplBase for Win32PipeImpl {
     // }
 
     fn close_handle(handle: &Handle) -> PipeResult<()> {
-        // println!("{} OsPipe::close for {:?}", header(), handle,);
+        trace_pipe!("closing {:?}", handle);
         unsafe { CloseHandle(handle.native()) }
             .map_err(|e| PipeError::FailedToCloseHandle(*handle, e))
     }
 
     fn read_handle(handle: &Handle, buf: &mut [u8]) -> PipeResult<usize> {
-        // eprintln!("{} OsPipe::read for {:?}", header(), handle,);
+        trace_pipe!("Reading from {:?}", handle);
 
         let mut bytes_read = 0;
         let res = unsafe { ReadFile(handle.native(), Some(buf), Some(&mut bytes_read), None) };
@@ -113,8 +113,11 @@ impl PipeImplBase for Win32PipeImpl {
         Ok(bytes_written as usize)
     }
 
-    fn should_close_other_for_mode(_mode: PipeMode) -> bool {
-        false
+    fn should_close_other_for_mode(mode: PipeMode) -> bool {
+        match mode {
+            PipeMode::CrossProcess => true,
+            PipeMode::InProcess => false,
+        }
     }
 }
 
