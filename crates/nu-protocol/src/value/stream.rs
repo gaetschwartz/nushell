@@ -336,10 +336,10 @@ mod tests {
 
         let mut buf: Vec<u8> = vec![];
 
-        stream.leftover = "Hello ".as_bytes().to_vec();
+        stream.leftover = "UwU ".as_bytes().to_vec();
 
         stream.read_to_end(&mut buf).unwrap();
 
-        assert_eq!(buf, "Hello World!".as_bytes());
+        assert_eq!(buf, "UwU Hello World!".as_bytes());
     }
 }

@@ -1,7 +1,10 @@
-use std::{borrow::Borrow};
+use std::borrow::Borrow;
+
+use log::trace;
 
 use crate::{
     unidirectional::{Pipe, PipeRead, PipeWrite},
+    utils::catch_result,
     Closeable, StreamEncoding,
 };
 
@@ -19,16 +22,38 @@ impl<'p> HandleWriter<'p> {
         let encoding = pipe.encoding();
         let finishable_write: Box<dyn FinishableWrite<Inner = Pipe<PipeWrite>> + 'p> =
             match encoding {
-                StreamEncoding::Zstd => Box::new(
-                    zstd::stream::Encoder::new(pipe.clone(), ZSTD_COMPRESSION_LEVEL)
-                        .expect("failed to create zstd encoder"),
-                ),
+                StreamEncoding::Zstd => {
+                    let encoder: Result<zstd::Encoder<'_, Pipe<PipeWrite>>, std::io::Error> =
+                        catch_result(|| {
+                            let mut enc =
+                                zstd::stream::Encoder::new(pipe.clone(), ZSTD_COMPRESSION_LEVEL)?;
+                            enc.multithread(1)?;
+                            Ok(enc)
+                        });
+                    match encoder {
+                        Ok(encoder) => Box::new(encoder),
+                        Err(e) => {
+                            trace!("failed to create zstd encoder, falling back to raw ({})", e);
+                            Box::new(pipe.clone())
+                        }
+                    }
+                }
                 StreamEncoding::None => Box::new(pipe.clone()),
             };
         Self {
             pipe,
             writer: Some(finishable_write),
         }
+    }
+
+    pub fn set_pledged_src_size(&mut self, size: Option<u64>) -> Result<(), std::io::Error> {
+        self.writer.as_mut().map_or(
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "writer is already closed",
+            )),
+            |w| w.set_pledged_src_size(size),
+        )
     }
 }
 
@@ -57,12 +82,19 @@ trait FinishableWrite: std::io::Write {
     type Inner: Sized;
 
     fn finish(self: Box<Self>) -> Result<(), std::io::Error>;
+    fn set_pledged_src_size(&mut self, _size: Option<u64>) -> Result<(), std::io::Error> {
+        Ok(())
+    }
 }
 
 impl FinishableWrite for zstd::stream::Encoder<'_, Pipe<PipeWrite>> {
     fn finish(self: Box<Self>) -> Result<(), std::io::Error> {
         zstd::stream::Encoder::finish(*self)?;
         Ok(())
+    }
+
+    fn set_pledged_src_size(&mut self, size: Option<u64>) -> Result<(), std::io::Error> {
+        zstd::stream::Encoder::set_pledged_src_size(self, size)
     }
 
     type Inner = Pipe<PipeWrite>;
@@ -89,14 +121,16 @@ impl<'p> HandleReader<'p> {
 
         let reader: Box<dyn std::io::Read> = match encoding {
             StreamEncoding::Zstd => {
-                if let Ok(decoder) = zstd::stream::Decoder::new(pipe.clone()) {
-                    Box::new(decoder)
-                } else {
-                    eprintln!("failed to create zstd decoder, falling back to raw");
-                    Box::new(std::io::BufReader::with_capacity(
-                        BUFFER_CAPACITY,
-                        pipe.clone(),
-                    ))
+                let decoder = zstd::stream::Decoder::new(pipe.clone());
+                match decoder {
+                    Ok(decoder) => Box::new(decoder),
+                    Err(e) => {
+                        trace!("failed to create zstd decoder, falling back to raw ({})", e);
+                        Box::new(std::io::BufReader::with_capacity(
+                            BUFFER_CAPACITY,
+                            pipe.clone(),
+                        ))
+                    }
                 }
             }
             StreamEncoding::None => Box::new(std::io::BufReader::with_capacity(

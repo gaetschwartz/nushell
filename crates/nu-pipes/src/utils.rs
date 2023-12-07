@@ -73,3 +73,7 @@ impl MaybeRawStream for Option<PipelineData> {
         }
     }
 }
+
+pub fn catch_result<T, E: std::error::Error, F: FnOnce() -> Result<T, E>>(f: F) -> Result<T, E> {
+    f()
+}

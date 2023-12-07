@@ -87,10 +87,10 @@ trait OpenablePipe {
 
 impl UnOpenedPipe<PipeRead> {
     pub fn open(&self) -> Result<HandleReader, PipeError> {
-        if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
-            // close both their ends of the pipe in our process
-            pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
-        }
+        // if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
+        //     // close both their ends of the pipe in our process
+        //     pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
+        // }
         let pipe = Pipe {
             datatype: self.datatype,
             encoding: self.encoding,
@@ -104,10 +104,10 @@ impl UnOpenedPipe<PipeRead> {
 }
 impl UnOpenedPipe<PipeWrite> {
     pub fn open(&self) -> Result<HandleWriter<'_>, PipeError> {
-        // if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
-        //     // close both their ends of the pipe in our process
-        //     pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
-        // }
+        if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
+            // close both their ends of the pipe in our process
+            pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
+        }
 
         let pipe = Pipe {
             datatype: self.datatype,
