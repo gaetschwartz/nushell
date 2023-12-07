@@ -3,7 +3,10 @@ mod plugin_custom_value;
 mod plugin_data;
 
 pub use evaluated_call::EvaluatedCall;
-use nu_pipes::unidirectional::{PipeRead, UnOpenedPipe};
+use nu_pipes::{
+    unidirectional::{PipeRead, UnOpenedPipe},
+    StreamCustomValue,
+};
 use nu_protocol::{PluginSignature, ShellError, Span, Value};
 pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
@@ -14,6 +17,36 @@ pub struct CallInfo {
     pub name: String,
     pub call: EvaluatedCall,
     pub input: CallInput,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum PluginPipelineData {
+    Value(Value),
+    ExternalStream(UnOpenedPipe<PipeRead>),
+}
+
+impl From<PluginPipelineData> for Value {
+    fn from(input: PluginPipelineData) -> Self {
+        match input {
+            PluginPipelineData::Value(value) => value,
+            PluginPipelineData::ExternalStream(pipe) => Value::custom_value(
+                Box::new(StreamCustomValue::new(pipe, Span::unknown())),
+                Span::unknown(),
+            ),
+        }
+    }
+}
+
+impl PluginPipelineData {
+    pub fn into_value(self) -> Value {
+        match self {
+            PluginPipelineData::Value(value) => value,
+            PluginPipelineData::ExternalStream(pipe) => Value::custom_value(
+                Box::new(StreamCustomValue::new(pipe, Span::unknown())),
+                Span::unknown(),
+            ),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

@@ -4,7 +4,9 @@ use nu_engine::documentation::get_flags_section;
 use nu_pipes::StreamCustomValue;
 use std::collections::HashMap;
 
-use crate::protocol::{CallInput, LabeledError, PluginCall, PluginData, PluginResponse};
+use crate::protocol::{
+    CallInput, LabeledError, PluginCall, PluginData, PluginPipelineData, PluginResponse,
+};
 use crate::EncodingType;
 use std::env;
 use std::fmt::Write;
@@ -233,6 +235,11 @@ pub trait Plugin {
     /// patterns we return a `Vec` of signatures.
     fn signature(&self) -> Vec<PluginSignature>;
 
+    /// Whether the plugin supports pipelined input
+    fn supports_pipelined_input(&self) -> bool {
+        false
+    }
+
     /// Perform the actual behavior of the plugin
     ///
     /// The behavior of the plugin is defined by the implementation of this method.
@@ -248,7 +255,7 @@ pub trait Plugin {
         &mut self,
         name: &str,
         call: &EvaluatedCall,
-        input: &Value,
+        input: PluginPipelineData,
     ) -> Result<Value, LabeledError>;
 }
 
@@ -320,8 +327,15 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                         .expect("Error encoding response");
                 }
                 PluginCall::CallInfo(call_info) => {
+                    let signature = plugin.signature();
+                    let current_sig = signature.iter().find(|sig| sig.sig.name == call_info.name);
+
+                    let supports_pipelined_input = current_sig
+                        .map(|sig| sig.supports_pipelined_input)
+                        .unwrap_or(false);
+
                     let input = match call_info.input {
-                        CallInput::Value(value) => Ok(value),
+                        CallInput::Value(value) => Ok(PluginPipelineData::Value(value)),
                         CallInput::Data(plugin_data) => {
                             bincode::deserialize::<Box<dyn CustomValue>>(&plugin_data.data)
                                 .map(|custom_value| {
@@ -330,15 +344,22 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                                 .map_err(|err| ShellError::PluginFailedToDecode {
                                     msg: err.to_string(),
                                 })
+                                .map(PluginPipelineData::Value)
                         }
-                        CallInput::Pipe(pipe) => Ok(Value::custom_value(
-                            Box::new(StreamCustomValue::new(pipe, call_info.call.head)),
-                            call_info.call.head,
-                        )),
+                        CallInput::Pipe(pipe) => {
+                            if supports_pipelined_input {
+                                Ok(PluginPipelineData::ExternalStream(pipe))
+                            } else {
+                                Ok(PluginPipelineData::Value(Value::custom_value(
+                                    Box::new(StreamCustomValue::new(pipe, call_info.call.head)),
+                                    call_info.call.head,
+                                )))
+                            }
+                        }
                     };
 
                     let value = match input {
-                        Ok(input) => plugin.run(&call_info.name, &call_info.call, &input),
+                        Ok(input) => plugin.run(&call_info.name, &call_info.call, input),
                         Err(err) => Err(err.into()),
                     };
 

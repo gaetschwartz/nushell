@@ -45,19 +45,22 @@ impl PluginDeclaration {
     ) -> Result<(CallInput, OptPipeData), ShellError> {
         let mut input = input;
 
-        if let Some(stdout) = input.take_stream() {
-            match UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
-                encoding: StreamEncoding::Zstd,
-                mode: PipeMode::CrossProcess,
-            }) {
-                Ok(p) => {
-                    return Ok((CallInput::Pipe(p.read), Some((p.write, stdout))));
-                }
-                Err(e) => {
-                    trace!("Unable to create pipe for plugin {}: {}", self.name, e);
+        if self.signature.supports_pipelined_input {
+            if let Some(stdout) = input.take_stream() {
+                match UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
+                    encoding: StreamEncoding::Zstd,
+                    mode: PipeMode::CrossProcess,
+                }) {
+                    Ok(p) => {
+                        return Ok((CallInput::Pipe(p.read), Some((p.write, stdout))));
+                    }
+                    Err(e) => {
+                        trace!("Unable to create pipe for plugin {}: {}", self.name, e);
+                    }
                 }
             }
         }
+
         let input = input.into_value(call.head);
         let span = input.span();
         let input = match input {
@@ -127,6 +130,10 @@ impl Command for PluginDeclaration {
             })
         }
         res
+    }
+
+    fn supports_pipelined_input(&self) -> bool {
+        self.signature.supports_pipelined_input
     }
 
     fn run(

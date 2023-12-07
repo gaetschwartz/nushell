@@ -1,6 +1,6 @@
 use crate::inc::SemVerAction;
 use crate::Inc;
-use nu_plugin::{EvaluatedCall, LabeledError, Plugin};
+use nu_plugin::{EvaluatedCall, LabeledError, Plugin, PluginPipelineData};
 use nu_protocol::{ast::CellPath, PluginSignature, SyntaxShape, Value};
 
 impl Plugin for Inc {
@@ -29,7 +29,7 @@ impl Plugin for Inc {
         &mut self,
         name: &str,
         call: &EvaluatedCall,
-        input: &Value,
+        input: PluginPipelineData,
     ) -> Result<Value, LabeledError> {
         if name != "inc" {
             return Ok(Value::nothing(call.head));
@@ -49,6 +49,6 @@ impl Plugin for Inc {
             self.for_semver(SemVerAction::Patch);
         }
 
-        self.inc(call.head, input)
+        self.inc(call.head, &input.into_value())
     }
 }
