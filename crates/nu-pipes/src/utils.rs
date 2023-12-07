@@ -18,7 +18,7 @@ macro_rules! function {
 
 #[allow(dead_code)]
 pub(crate) fn trace_pipes_enabled() -> bool {
-    matches!(option_env!("NU_TRACE_PIPES"), Some("1" | "true"))
+    matches!(option_env!("NU_TRACE_PIPES"), Some("1") | Some("true"))
 }
 
 #[allow(dead_code)]
@@ -34,11 +34,13 @@ macro_rules! trace_pipe {
     // use eprintln to print "exec_name | function_name:line_number: a log event"
     ($($arg:tt)+) => (
         if $crate::utils::trace_pipes_enabled() {
-            eprintln!("{} | {}: {}", std::path::PathBuf::from(std::env::args().next().unwrap_or_default())
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string(), $crate::function!(), format!($($arg)+))
+            const PURPLE_ANSI: &str = "\x1b[38;5;129m";
+            const RESET_ANSI: &str = "\x1b[0m";
+            const DIMMED_ANSI: &str = "\x1b[2m";
+            const BLUE_ANSI: &str = "\x1b[38;5;39m";
+            const LIGHT_BLUE_ANSI: &str = "\x1b[38;5;153m";
+            const ORANGE_ANSI: &str = "\x1b[38;5;208m";
+            eprintln!("{PURPLE_ANSI}[TRACE]{RESET_ANSI} [{BLUE_ANSI}{}{RESET_ANSI}@{LIGHT_BLUE_ANSI}{}{RESET_ANSI}] {DIMMED_ANSI}({}:{}){RESET_ANSI} {ORANGE_ANSI}{}{RESET_ANSI}: {}",$crate::utils::exec_name(),std::thread::current().name().unwrap_or("<unnamed>"), file!(), line!(), $crate::function!(), format_args!($($arg)+), PURPLE_ANSI = PURPLE_ANSI, RESET_ANSI = RESET_ANSI, DIMMED_ANSI = DIMMED_ANSI);
         }
     );
 }

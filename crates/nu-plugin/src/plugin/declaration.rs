@@ -153,18 +153,18 @@ impl Command for PluginDeclaration {
             (None, None)
         };
 
-        thread::scope(|s| {
-            let mut child = plugin_cmd.spawn().map_err(|err| {
-                let decl = engine_state.get_decl(call.decl_id);
-                ShellError::GenericError(
-                    format!("Unable to spawn plugin for {}", decl.name()),
-                    format!("{err}"),
-                    Some(call.head),
-                    None,
-                    Vec::new(),
-                )
-            })?;
+        let mut child = plugin_cmd.spawn().map_err(|err| {
+            let decl = engine_state.get_decl(call.decl_id);
+            ShellError::GenericError(
+                format!("Unable to spawn plugin for {}", decl.name()),
+                format!("{err}"),
+                Some(call.head),
+                None,
+                Vec::new(),
+            )
+        })?;
 
+        thread::scope(|s| {
             let join_handle = if let (Some(pipe), Some(stdout)) = (&pipe, stream) {
                 pipe.send(s, stdout)?
             } else {
