@@ -2,8 +2,9 @@ use nu_protocol::StreamDataType;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    io::{PipeReader, PipeWriter},
     os_pipes::{pipe_impl, PipeImplBase},
-    Handle, HandleReader, HandleTypeEnum, HandleWriter, PipeError, StreamEncoding,
+    Handle, HandleTypeEnum, PipeError, StreamEncoding,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -17,10 +18,10 @@ pub struct UnOpenedPipe<T: HandleType> {
     pub datatype: StreamDataType,
     pub encoding: StreamEncoding,
 
-    handle: Handle,
-    other_handle: Handle,
+    pub(crate) handle: Handle,
+    pub(crate) other_handle: Handle,
     pub mode: PipeMode,
-    ty: T,
+    pub(crate) ty: T,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -31,6 +32,24 @@ pub struct Pipe<T: HandleType> {
     pub(crate) handle: Handle,
     pub(crate) mode: PipeMode,
     marker: std::marker::PhantomData<T>,
+}
+
+impl<T: HandleType> Pipe<T> {
+    pub fn invalid() -> Self {
+        Self {
+            datatype: StreamDataType::Binary,
+            encoding: StreamEncoding::None,
+            #[cfg(windows)]
+            handle: Handle(
+                windows::Win32::Foundation::INVALID_HANDLE_VALUE,
+                HandleTypeEnum::Read,
+            ),
+            #[cfg(unix)]
+            handle: Handle(-1, HandleTypeEnum::Read),
+            mode: PipeMode::CrossProcess,
+            marker: std::marker::PhantomData,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -86,7 +105,7 @@ trait OpenablePipe {
 }
 
 impl UnOpenedPipe<PipeRead> {
-    pub fn open(&self) -> Result<HandleReader, PipeError> {
+    pub fn open(&self) -> Result<PipeReader, PipeError> {
         if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
             pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
@@ -99,11 +118,11 @@ impl UnOpenedPipe<PipeRead> {
             marker: std::marker::PhantomData,
         };
 
-        Ok(HandleReader::new(pipe))
+        Ok(PipeReader::new(pipe))
     }
 }
 impl UnOpenedPipe<PipeWrite> {
-    pub fn open(&self) -> Result<HandleWriter<'_>, PipeError> {
+    pub fn open(&self) -> Result<PipeWriter<'_>, PipeError> {
         if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
             pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
@@ -117,7 +136,7 @@ impl UnOpenedPipe<PipeWrite> {
             marker: std::marker::PhantomData,
         };
 
-        Ok(HandleWriter::new(pipe))
+        Ok(PipeWriter::new(pipe))
     }
 }
 
@@ -140,6 +159,7 @@ impl std::io::Read for Pipe<PipeRead> {
         Ok(pipe_impl::PipeImpl::read_handle(&self.handle, buf)?)
     }
 }
+
 impl std::io::Write for Pipe<PipeWrite> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         Ok(pipe_impl::PipeImpl::write_handle(&self.handle, buf)?)

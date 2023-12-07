@@ -1,12 +1,6 @@
-use std::{cmp::Ordering, fmt, path::PathBuf};
+use std::{cmp::Ordering, fmt};
 
-use chrono::{DateTime, FixedOffset};
-
-use crate::{
-    ast::{CellPath, MatchPattern, Operator},
-    engine::Closure,
-    BlockId, LazyRecord, Range, Record, ShellError, Span, Spanned, Value,
-};
+use crate::{ast::Operator, LazyRecord, ShellError, Span, Spanned, Value};
 
 // Trait definition for a custom value
 #[typetag::serde(tag = "type")]

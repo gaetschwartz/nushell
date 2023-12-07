@@ -5,7 +5,7 @@ mod plugin_data;
 pub use evaluated_call::EvaluatedCall;
 use nu_pipes::{
     unidirectional::{PipeRead, UnOpenedPipe},
-    StreamCustomValue,
+    PipeReader, StreamCustomValue,
 };
 use nu_protocol::{PluginSignature, ShellError, Span, Value};
 pub use plugin_custom_value::PluginCustomValue;
@@ -19,7 +19,7 @@ pub struct CallInfo {
     pub input: CallInput,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug)]
 pub enum PluginPipelineData {
     Value(Value),
     ExternalStream(UnOpenedPipe<PipeRead>),
