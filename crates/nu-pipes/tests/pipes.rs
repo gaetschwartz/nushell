@@ -150,12 +150,6 @@ fn test_pipe_in_another_process() {
     let serialized = serde_json::to_string(&read).unwrap();
     println!("{}", serialized);
 
-    println!("Running pipe_echoer...");
-    let mut writer = write.open().unwrap();
-    // write hello world to the pipe
-    let written = writer.write("hello world".as_bytes()).unwrap();
-    assert_eq!(written, 11);
-
     // spawn a new process
     let mut res = Command::new("cargo")
         .arg("run")
@@ -167,6 +161,11 @@ fn test_pipe_in_another_process() {
         .spawn()
         .unwrap();
 
+    println!("Running pipe_echoer...");
+    let mut writer = write.open().unwrap();
+    // write hello world to the pipe
+    let written = writer.write("hello world".as_bytes()).unwrap();
+    assert_eq!(written, 11);
     writer.close().unwrap();
 
     let code = res.wait().unwrap();
