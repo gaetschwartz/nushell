@@ -12,7 +12,8 @@ use log::trace;
 use nu_pipes::unidirectional::{
     PipeMode, PipeWrite, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
 };
-use nu_pipes::{MaybeRawStream, StreamEncoding};
+use nu_pipes::utils::MaybeRawStream;
+use nu_pipes::{PipeEncoding, StreamSender};
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::{ast::Call, PluginSignature, Signature};
 use nu_protocol::{Example, PipelineData, RawStream, ShellError, Value};
@@ -48,7 +49,7 @@ impl PluginDeclaration {
         if self.signature.supports_pipelined_input {
             if let Some(stdout) = input.take_stream() {
                 match UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
-                    encoding: StreamEncoding::Zstd,
+                    encoding: PipeEncoding::Zstd,
                     mode: PipeMode::CrossProcess,
                 }) {
                     Ok(p) => {
@@ -173,7 +174,7 @@ impl Command for PluginDeclaration {
 
         thread::scope(|s| {
             let join_handle = if let (Some(pipe), Some(stdout)) = (&pipe, stream) {
-                pipe.send(s, stdout)?
+                pipe.send_stream_scoped(s, stdout)?
             } else {
                 None
             };

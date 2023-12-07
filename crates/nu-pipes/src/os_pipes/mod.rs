@@ -7,6 +7,7 @@ use self::{
     pipe_impl::InnerHandleType,
     unidirectional::PipeMode,
 };
+pub use pipe_impl::OSError;
 
 // pub mod bidirectional;
 pub mod io;
@@ -15,8 +16,6 @@ pub mod unidirectional;
 #[cfg_attr(windows, path = "windows.rs")]
 #[cfg_attr(unix, path = "unix.rs")]
 mod pipe_impl;
-
-pub use pipe_impl::OSError;
 
 trait PipeImplBase {
     fn create_pipe() -> Result<OsPipe, PipeError>;
@@ -81,7 +80,7 @@ impl From<Handle> for InnerHandleType {
 pub trait HandleIO {
     /// Returns the handle of the object.
     fn handle(&self) -> Handle;
-    fn encoding(&self) -> StreamEncoding;
+    fn encoding(&self) -> PipeEncoding;
 }
 
 pub trait AsNativeHandle {
@@ -106,7 +105,7 @@ impl HandleIO for PipeWriter<'_> {
         self.pipe.handle
     }
 
-    fn encoding(&self) -> StreamEncoding {
+    fn encoding(&self) -> PipeEncoding {
         self.pipe.encoding
     }
 }
@@ -116,7 +115,7 @@ impl HandleIO for PipeReader {
         self.pipe.handle
     }
 
-    fn encoding(&self) -> StreamEncoding {
+    fn encoding(&self) -> PipeEncoding {
         self.pipe.encoding
     }
 }
@@ -137,7 +136,7 @@ impl std::fmt::Display for Handle {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum StreamEncoding {
+pub enum PipeEncoding {
     Zstd,
     None,
 }

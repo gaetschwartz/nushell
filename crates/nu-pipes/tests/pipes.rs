@@ -7,7 +7,7 @@ use nu_pipes::{
     unidirectional::{
         PipeMode, PipeRead, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
     },
-    utils, Closeable, StreamEncoding,
+    utils, PipeEncoding,
 };
 
 trait TestPipeExt {
@@ -17,7 +17,7 @@ trait TestPipeExt {
 impl TestPipeExt for UnidirectionalPipe {
     fn in_process() -> Self {
         Self::create_from_options(UniDirectionalPipeOptions {
-            encoding: StreamEncoding::None,
+            encoding: PipeEncoding::None,
             mode: PipeMode::InProcess,
         })
         .unwrap()
@@ -138,7 +138,7 @@ fn test_pipe_in_another_process() {
 
     let UnidirectionalPipe { read, write } =
         UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
-            encoding: StreamEncoding::None,
+            encoding: PipeEncoding::None,
             mode: PipeMode::CrossProcess,
         })
         .unwrap();

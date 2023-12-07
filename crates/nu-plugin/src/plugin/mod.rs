@@ -1,7 +1,7 @@
 mod declaration;
 pub use declaration::PluginDeclaration;
 use nu_engine::documentation::get_flags_section;
-use nu_pipes::StreamCustomValue;
+use nu_pipes::PipeReaderCustomValue;
 use std::collections::HashMap;
 
 use crate::protocol::{
@@ -351,7 +351,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                                 Ok(PluginPipelineData::ExternalStream(pipe))
                             } else {
                                 Ok(PluginPipelineData::Value(Value::custom_value(
-                                    Box::new(StreamCustomValue::new(pipe, call_info.call.head)),
+                                    Box::new(PipeReaderCustomValue::new(pipe, call_info.call.head)),
                                     call_info.call.head,
                                 )))
                             }

@@ -2,13 +2,10 @@ use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value}
 use serde::{Deserialize, Serialize};
 use std::{io::Read, sync::OnceLock};
 
-use crate::{
-    unidirectional::{Pipe, PipeRead, UnOpenedPipe},
-    PipeReader,
-};
+use crate::unidirectional::{PipeRead, UnOpenedPipe};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct StreamCustomValue {
+pub struct PipeReaderCustomValue {
     pub span: Span,
     #[serde(skip, default)]
     pub data: OnceLock<Vec<u8>>,
@@ -17,7 +14,7 @@ pub struct StreamCustomValue {
     datatype: StreamDataType,
 }
 
-impl StreamCustomValue {
+impl PipeReaderCustomValue {
     pub fn new(os_pipe: UnOpenedPipe<PipeRead>, span: Span) -> Self {
         Self {
             span,
@@ -53,7 +50,7 @@ fn read_pipe(pipe: &UnOpenedPipe<PipeRead>) -> Result<Vec<u8>, ShellError> {
     Ok(vec)
 }
 
-impl CustomValue for StreamCustomValue {
+impl CustomValue for PipeReaderCustomValue {
     fn clone_value(&self, span: Span) -> Value {
         if let Some(cell) = self.data.get() {
             Value::binary(cell.to_vec(), span)
