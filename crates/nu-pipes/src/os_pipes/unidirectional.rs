@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     io::{PipeReader, PipeWriter},
     os_pipes::{pipe_impl, PipeImplBase},
-    Handle, HandleTypeEnum, PipeError, StreamEncoding,
+    Handle, HandleTypeEnum, PipeEncoding, PipeError,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -16,7 +16,7 @@ pub enum PipeDirection {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct UnOpenedPipe<T: HandleType> {
     pub datatype: StreamDataType,
-    pub encoding: StreamEncoding,
+    pub encoding: PipeEncoding,
 
     pub(crate) handle: Handle,
     pub(crate) other_handle: Handle,
@@ -27,7 +27,7 @@ pub struct UnOpenedPipe<T: HandleType> {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Pipe<T: HandleType> {
     pub(crate) datatype: StreamDataType,
-    pub(crate) encoding: StreamEncoding,
+    pub(crate) encoding: PipeEncoding,
 
     pub(crate) handle: Handle,
     pub(crate) mode: PipeMode,
@@ -38,7 +38,7 @@ impl<T: HandleType> Pipe<T> {
     pub fn invalid() -> Self {
         Self {
             datatype: StreamDataType::Binary,
-            encoding: StreamEncoding::None,
+            encoding: PipeEncoding::None,
             #[cfg(windows)]
             handle: Handle(
                 windows::Win32::Foundation::INVALID_HANDLE_VALUE,
@@ -145,7 +145,7 @@ impl<T: HandleType> Pipe<T> {
         pipe_impl::PipeImpl::close_handle(&self.handle)
     }
 
-    pub fn encoding(&self) -> StreamEncoding {
+    pub fn encoding(&self) -> PipeEncoding {
         self.encoding
     }
 
@@ -252,14 +252,14 @@ pub enum PipeMode {
 }
 
 pub struct UniDirectionalPipeOptions {
-    pub encoding: StreamEncoding,
+    pub encoding: PipeEncoding,
     pub mode: PipeMode,
 }
 
 impl Default for UniDirectionalPipeOptions {
     fn default() -> Self {
         Self {
-            encoding: StreamEncoding::None,
+            encoding: PipeEncoding::None,
             mode: PipeMode::CrossProcess,
         }
     }

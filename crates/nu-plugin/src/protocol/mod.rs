@@ -5,7 +5,7 @@ mod plugin_data;
 pub use evaluated_call::EvaluatedCall;
 use nu_pipes::{
     unidirectional::{PipeRead, UnOpenedPipe},
-    PipeReader, StreamCustomValue,
+    PipeReaderCustomValue,
 };
 use nu_protocol::{PluginSignature, ShellError, Span, Value};
 pub use plugin_custom_value::PluginCustomValue;
@@ -30,7 +30,7 @@ impl From<PluginPipelineData> for Value {
         match input {
             PluginPipelineData::Value(value) => value,
             PluginPipelineData::ExternalStream(pipe) => Value::custom_value(
-                Box::new(StreamCustomValue::new(pipe, Span::unknown())),
+                Box::new(PipeReaderCustomValue::new(pipe, Span::unknown())),
                 Span::unknown(),
             ),
         }
@@ -42,7 +42,7 @@ impl PluginPipelineData {
         match self {
             PluginPipelineData::Value(value) => value,
             PluginPipelineData::ExternalStream(pipe) => Value::custom_value(
-                Box::new(StreamCustomValue::new(pipe, Span::unknown())),
+                Box::new(PipeReaderCustomValue::new(pipe, Span::unknown())),
                 Span::unknown(),
             ),
         }

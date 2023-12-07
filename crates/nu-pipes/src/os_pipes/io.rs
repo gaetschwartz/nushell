@@ -1,13 +1,9 @@
-use std::{borrow::Borrow, sync::OnceLock};
-
 use log::trace;
-use nu_protocol::{ShellError, Value};
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 
 use crate::{
-    unidirectional::{Pipe, PipeRead, PipeWrite, UnOpenedPipe},
+    unidirectional::{Pipe, PipeRead, PipeWrite},
     utils::catch_result,
-    Closeable, StreamEncoding,
+    Closeable, PipeEncoding,
 };
 
 const BUFFER_CAPACITY: usize = 16 * 1024 * 1024;
@@ -24,7 +20,7 @@ impl<'p> PipeWriter<'p> {
         let encoding = pipe.encoding();
         let finishable_write: Box<dyn FinishableWrite<Inner = Pipe<PipeWrite>> + 'p> =
             match encoding {
-                StreamEncoding::Zstd => {
+                PipeEncoding::Zstd => {
                     let encoder: Result<zstd::Encoder<'_, Pipe<PipeWrite>>, std::io::Error> =
                         catch_result(|| {
                             let mut enc =
@@ -40,7 +36,7 @@ impl<'p> PipeWriter<'p> {
                         }
                     }
                 }
-                StreamEncoding::None => Box::new(pipe.clone()),
+                PipeEncoding::None => Box::new(pipe.clone()),
             };
         Self {
             pipe,
@@ -158,7 +154,7 @@ impl PipeReader {
         let encoding = pipe.encoding();
 
         let reader: Box<dyn std::io::Read + Send> = match encoding {
-            StreamEncoding::Zstd => {
+            PipeEncoding::Zstd => {
                 let decoder = zstd::stream::Decoder::new(pipe.clone());
                 match decoder {
                     Ok(decoder) => Box::new(decoder),
@@ -171,7 +167,7 @@ impl PipeReader {
                     }
                 }
             }
-            StreamEncoding::None => Box::new(std::io::BufReader::with_capacity(
+            PipeEncoding::None => Box::new(std::io::BufReader::with_capacity(
                 BUFFER_CAPACITY,
                 pipe.clone(),
             )),

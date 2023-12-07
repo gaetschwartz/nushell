@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, fmt};
 
-use crate::{ast::Operator, LazyRecord, ShellError, Span, Spanned, Value};
+use crate::{ast::Operator, ShellError, Span, Spanned, Value};
 
 // Trait definition for a custom value
 #[typetag::serde(tag = "type")]
