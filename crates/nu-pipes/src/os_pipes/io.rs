@@ -7,7 +7,9 @@ use crate::{
 };
 
 const BUFFER_CAPACITY: usize = 16 * 1024 * 1024;
-const ZSTD_COMPRESSION_LEVEL: i32 = 0;
+const ZSTD_COMPRESSION_LEVEL: i32 = 12;
+const ZSTD_WINDOW_LOG: u32 = 30;
+const ZSTD_ENABLE_MULTITHREAD: bool = true;
 
 /// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
 pub struct PipeWriter<'p> {
@@ -21,13 +23,15 @@ impl<'p> PipeWriter<'p> {
         let finishable_write: Box<dyn FinishableWrite<Inner = Pipe<PipeWrite>> + 'p> =
             match encoding {
                 PipeEncoding::Zstd => {
-                    let encoder: Result<zstd::Encoder<'_, Pipe<PipeWrite>>, std::io::Error> =
-                        catch_result(|| {
-                            let mut enc =
-                                zstd::stream::Encoder::new(pipe.clone(), ZSTD_COMPRESSION_LEVEL)?;
+                    let encoder = catch_result::<_, std::io::Error, _>(|| {
+                        let mut enc =
+                            zstd::stream::Encoder::new(pipe.clone(), ZSTD_COMPRESSION_LEVEL)?;
+                        if ZSTD_ENABLE_MULTITHREAD {
                             enc.multithread(num_cpus::get() as u32 - 1)?;
-                            Ok(enc)
-                        });
+                        }
+                        enc.window_log(ZSTD_WINDOW_LOG)?;
+                        Ok(enc)
+                    });
                     match encoder {
                         Ok(encoder) => Box::new(encoder),
                         Err(e) => {
@@ -155,7 +159,11 @@ impl PipeReader {
 
         let reader: Box<dyn std::io::Read + Send> = match encoding {
             PipeEncoding::Zstd => {
-                let decoder = zstd::stream::Decoder::new(pipe.clone());
+                let decoder = catch_result::<_, std::io::Error, _>(|| {
+                    let mut dec = zstd::stream::Decoder::new(pipe.clone())?;
+                    dec.window_log_max(ZSTD_WINDOW_LOG)?;
+                    Ok(dec)
+                });
                 match decoder {
                     Ok(decoder) => Box::new(decoder),
                     Err(e) => {
