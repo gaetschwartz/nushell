@@ -2905,6 +2905,7 @@ dependencies = [
  "nu-json",
  "nu-parser",
  "nu-path",
+ "nu-pipes",
  "nu-pretty-hex",
  "nu-protocol",
  "nu-system",
@@ -3067,6 +3068,7 @@ dependencies = [
  "serde_json",
  "windows 0.52.0",
  "zstd 0.13.0",
+ "zstd-safe 7.0.0",
 ]
 
 [[package]]
