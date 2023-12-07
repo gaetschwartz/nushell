@@ -25,7 +25,7 @@ impl<'p> PipeWriter<'p> {
                         catch_result(|| {
                             let mut enc =
                                 zstd::stream::Encoder::new(pipe.clone(), ZSTD_COMPRESSION_LEVEL)?;
-                            enc.multithread(1)?;
+                            enc.multithread(num_cpus::get() as u32 - 1)?;
                             Ok(enc)
                         });
                     match encoder {
