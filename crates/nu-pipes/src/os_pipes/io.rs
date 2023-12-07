@@ -1,9 +1,11 @@
-use std::borrow::Borrow;
+use std::{borrow::Borrow, sync::OnceLock};
 
 use log::trace;
+use nu_protocol::{ShellError, Value};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 
 use crate::{
-    unidirectional::{Pipe, PipeRead, PipeWrite},
+    unidirectional::{Pipe, PipeRead, PipeWrite, UnOpenedPipe},
     utils::catch_result,
     Closeable, StreamEncoding,
 };
@@ -12,12 +14,12 @@ const BUFFER_CAPACITY: usize = 16 * 1024 * 1024;
 const ZSTD_COMPRESSION_LEVEL: i32 = 0;
 
 /// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
-pub struct HandleWriter<'p> {
+pub struct PipeWriter<'p> {
     pub(crate) pipe: Pipe<PipeWrite>,
     writer: Option<Box<dyn FinishableWrite<Inner = Pipe<PipeWrite>> + 'p>>,
 }
 
-impl<'p> HandleWriter<'p> {
+impl<'p> PipeWriter<'p> {
     pub fn new(pipe: Pipe<PipeWrite>) -> Self {
         let encoding = pipe.encoding();
         let finishable_write: Box<dyn FinishableWrite<Inner = Pipe<PipeWrite>> + 'p> =
@@ -55,9 +57,31 @@ impl<'p> HandleWriter<'p> {
             |w| w.set_pledged_src_size(size),
         )
     }
+
+    pub fn close(&mut self) -> Result<(), std::io::Error> {
+        let writer = self.writer.take();
+        match writer {
+            Some(writer) => {
+                writer.finish()?;
+            }
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "failed to close handle: writer is already closed",
+                ))
+            }
+        }
+
+        self.pipe.close().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to close handle: {:?}", e),
+            )
+        })
+    }
 }
 
-impl std::io::Write for HandleWriter<'_> {
+impl std::io::Write for PipeWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.writer.as_mut().map_or(
             Err(std::io::Error::new(
@@ -110,16 +134,30 @@ impl FinishableWrite for Pipe<PipeWrite> {
 }
 
 /// A struct representing a handle reader.
-pub struct HandleReader<'p> {
-    pub(crate) reader: Box<dyn std::io::Read + 'p>,
-    pub(crate) pipe: Pipe<PipeRead>,
+pub struct PipeReader {
+    pub(crate) reader: Box<dyn std::io::Read + Send>,
+    pub pipe: Pipe<PipeRead>,
 }
 
-impl<'p> HandleReader<'p> {
+impl Clone for PipeReader {
+    fn clone(&self) -> Self {
+        PipeReader::new(self.pipe.clone())
+    }
+}
+
+impl std::fmt::Debug for PipeReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PipeReader")
+            .field("pipe", &self.pipe)
+            .finish()
+    }
+}
+
+impl PipeReader {
     pub fn new(pipe: Pipe<PipeRead>) -> Self {
         let encoding = pipe.encoding();
 
-        let reader: Box<dyn std::io::Read> = match encoding {
+        let reader: Box<dyn std::io::Read + Send> = match encoding {
             StreamEncoding::Zstd => {
                 let decoder = zstd::stream::Decoder::new(pipe.clone());
                 match decoder {
@@ -142,32 +180,7 @@ impl<'p> HandleReader<'p> {
         Self { reader, pipe }
     }
 
-    fn pipe(&self) -> &Pipe<PipeRead> {
-        self.pipe.borrow()
-    }
-}
-
-impl std::io::Read for HandleReader<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.reader.read(buf)
-    }
-}
-
-impl Closeable for HandleWriter<'_> {
-    fn close(&mut self) -> Result<(), std::io::Error> {
-        let writer = self.writer.take();
-        match writer {
-            Some(writer) => {
-                writer.finish()?;
-            }
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "failed to close handle: writer is already closed",
-                ))
-            }
-        }
-
+    pub fn close(&mut self) -> Result<(), std::io::Error> {
         self.pipe.close().map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -175,15 +188,28 @@ impl Closeable for HandleWriter<'_> {
             )
         })
     }
-}
 
-impl Closeable for HandleReader<'_> {
-    fn close(&mut self) -> Result<(), std::io::Error> {
-        self.pipe().close().map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed to close handle: {:?}", e),
-            )
-        })
+    pub fn into_pipe(self) -> Pipe<PipeRead> {
+        self.pipe
     }
 }
+
+impl std::io::Read for PipeReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(buf)
+    }
+}
+
+impl Closeable for PipeReader {
+    fn close(&mut self) -> Result<(), std::io::Error> {
+        Self::close(self)
+    }
+}
+
+impl Closeable for PipeWriter<'_> {
+    fn close(&mut self) -> Result<(), std::io::Error> {
+        Self::close(self)
+    }
+}
+
+unsafe impl Sync for PipeReader {}

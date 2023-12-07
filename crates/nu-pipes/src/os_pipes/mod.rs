@@ -2,13 +2,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{PipeError, PipeResult};
 
-use self::{pipe_impl::InnerHandleType, unidirectional::PipeMode};
+use self::{
+    io::{PipeReader, PipeWriter},
+    pipe_impl::InnerHandleType,
+    unidirectional::PipeMode,
+};
 
 // pub mod bidirectional;
-mod io;
+pub mod io;
 pub mod unidirectional;
-
-pub use io::*;
 
 #[cfg_attr(windows, path = "windows.rs")]
 #[cfg_attr(unix, path = "unix.rs")]
@@ -43,8 +45,8 @@ pub enum HandleTypeEnum {
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Handle(
-    #[cfg_attr(windows, serde(with = "pipe_impl::handle_serialization"))] InnerHandleType,
-    HandleTypeEnum,
+    #[cfg_attr(windows, serde(with = "pipe_impl::handle_serialization"))] pub(crate) InnerHandleType,
+    pub(crate) HandleTypeEnum,
 );
 
 impl Handle {
@@ -99,7 +101,7 @@ impl<T: HandleIO> AsNativeHandle for T {
     }
 }
 
-impl HandleIO for HandleWriter<'_> {
+impl HandleIO for PipeWriter<'_> {
     fn handle(&self) -> Handle {
         self.pipe.handle
     }
@@ -109,7 +111,7 @@ impl HandleIO for HandleWriter<'_> {
     }
 }
 
-impl HandleIO for HandleReader<'_> {
+impl HandleIO for PipeReader {
     fn handle(&self) -> Handle {
         self.pipe.handle
     }
