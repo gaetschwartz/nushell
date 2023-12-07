@@ -1,9 +1,9 @@
 use std::thread::Scope;
 use std::thread::ScopedJoinHandle;
 
-use log::trace;
 use nu_protocol::{RawStream, ShellError};
 
+use crate::trace_pipe;
 use crate::{
     unidirectional::{PipeWrite, UnOpenedPipe},
     Closeable,
@@ -96,40 +96,37 @@ impl<'a> UnOpenedPipe<PipeWrite> {
     where
         'a: 'env,
     {
-        let handle = scope.spawn(move || {
-            let mut writer = self.open().unwrap();
-            if let Some(size) = stdout.known_size {
-                _ = writer.set_pledged_src_size(Some(size));
-            }
-            let mut stdout = stdout;
+        let handle = std::thread::Builder::new()
+            .name("serve_stream".to_owned())
+            .spawn_scoped(scope, move || {
+                let mut writer = self.open().unwrap();
+                if let Some(size) = stdout.known_size {
+                    _ = writer.set_pledged_src_size(Some(size));
+                }
+                let mut stdout = stdout;
 
-            match std::io::copy(&mut stdout, &mut writer) {
-                Ok(_) => {
-                    trace!("OsPipe::start_pipe thread finished writing");
+                match std::io::copy(&mut stdout, &mut writer) {
+                    Ok(_) => {
+                        trace_pipe!("finished writing");
+                    }
+                    Err(e) => {
+                        trace_pipe!("error: failed to write to pipe: {:?}", e);
+                    }
                 }
-                Err(e) => {
-                    trace!(
-                        "OsPipe::start_pipe thread error: failed to write to pipe: {:?}",
-                        e
-                    );
-                }
-            }
 
-            match writer.close() {
-                Ok(_) => {
-                    trace!("OsPipe::start_pipe thread flushed pipe");
+                match writer.close() {
+                    Ok(_) => {
+                        trace_pipe!("lushed pipe");
+                    }
+                    Err(e) => {
+                        trace_pipe!("error: failed to flush pipe: {:?}", e);
+                    }
                 }
-                Err(e) => {
-                    trace!(
-                        "OsPipe::start_pipe thread error: failed to flush pipe: {:?}",
-                        e
-                    );
-                }
-            }
 
-            trace!("OsPipe::start_pipe thread finished writing, closing pipe");
-            // close the pipe when the stream is finished
-        });
+                trace_pipe!("finished writing, closing pipe");
+                // close the pipe when the stream is finished
+            })
+            .expect("failed to spawn thread");
 
         Ok(Some(handle))
     }

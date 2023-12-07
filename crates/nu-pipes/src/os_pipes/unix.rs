@@ -25,7 +25,7 @@ impl PipeImplBase for UnixPipeImpl {
     }
 
     fn close_handle(handle: &Handle) -> Result<(), PipeError> {
-        eprintln!("!!! closing {:?}", handle);
+        trace_pipe!("!!! closing {:?}", handle);
         let res = unsafe { libc::close(handle.native()) };
 
         if res < 0 {
@@ -69,6 +69,9 @@ impl PipeImplBase for UnixPipeImpl {
     }
 
     fn should_close_other_for_mode(mode: PipeMode) -> bool {
-        false
+        match mode {
+            PipeMode::InProcess => false,
+            PipeMode::CrossProcess => true,
+        }
     }
 }
