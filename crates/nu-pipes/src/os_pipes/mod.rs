@@ -140,3 +140,13 @@ pub enum PipeEncoding {
     Zstd,
     None,
 }
+
+impl PipeEncoding {
+    #[inline(always)]
+    pub fn recommended_input_size(&self) -> usize {
+        match self {
+            PipeEncoding::Zstd => zstd_safe::DCtx::in_size(),
+            PipeEncoding::None => 16 * 1024,
+        }
+    }
+}

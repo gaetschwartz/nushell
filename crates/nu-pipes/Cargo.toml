@@ -25,6 +25,7 @@ konst = "0.3.7"
 serde_json = "1.0.108"
 casey = "0.4.0"
 num_cpus = "1.16.0"
+zstd-safe = "7.0.0"
 
 
 [target.'cfg(windows)'.dependencies.windows]
