@@ -5,7 +5,7 @@ use std::{
 
 use nu_pipes::{
     unidirectional::{
-        PipeMode, PipeRead, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
+        PipeMode, PipeRead, UnOpenedPipe, UnidirectionalPipe, UnidirectionalPipeOptions,
     },
     utils, PipeEncoding,
 };
@@ -16,7 +16,7 @@ trait TestPipeExt {
 
 impl TestPipeExt for UnidirectionalPipe {
     fn in_process() -> Self {
-        Self::create_from_options(UniDirectionalPipeOptions {
+        Self::create_from_options(UnidirectionalPipeOptions {
             encoding: PipeEncoding::None,
             mode: PipeMode::InProcess,
         })
@@ -137,7 +137,7 @@ fn test_pipe_in_another_process() {
         .unwrap();
 
     let UnidirectionalPipe { read, write } =
-        UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
+        UnidirectionalPipe::create_from_options(UnidirectionalPipeOptions {
             encoding: PipeEncoding::None,
             mode: PipeMode::CrossProcess,
         })

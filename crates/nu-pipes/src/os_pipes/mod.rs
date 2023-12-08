@@ -10,6 +10,7 @@ use self::{
 pub use pipe_impl::OSError;
 
 // pub mod bidirectional;
+pub mod bidirectional;
 pub mod io;
 pub mod unidirectional;
 

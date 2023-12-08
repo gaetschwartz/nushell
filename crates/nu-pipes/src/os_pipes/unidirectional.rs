@@ -62,11 +62,11 @@ impl UnidirectionalPipe {
     /// Creates a new pipe. Pipes are unidirectional streams of bytes composed of a read end and a write end. They can be used for interprocess communication.
     /// Uses `pipe(2)` on unix and `CreatePipe` on windows.
     pub fn create_default() -> Result<Self, PipeError> {
-        Self::create_from_options(UniDirectionalPipeOptions::default())
+        Self::create_from_options(UnidirectionalPipeOptions::default())
     }
 
     pub fn create_from_options(
-        arg: UniDirectionalPipeOptions,
+        arg: UnidirectionalPipeOptions,
     ) -> Result<UnidirectionalPipe, PipeError> {
         let pipe = pipe_impl::PipeImpl::create_pipe()?;
         assert!(pipe.write_handle.1 == HandleTypeEnum::Write);
@@ -93,6 +93,10 @@ impl UnidirectionalPipe {
             write: wp,
         })
     }
+
+    pub fn tuple(self) -> (UnOpenedPipe<PipeRead>, UnOpenedPipe<PipeWrite>) {
+        (self.read, self.write)
+    }
 }
 
 pub trait HandleIO<T: HandleType> {
@@ -106,6 +110,10 @@ trait OpenablePipe {
 
 impl UnOpenedPipe<PipeRead> {
     pub fn open(&self) -> Result<PipeReader, PipeError> {
+        Ok(PipeReader::new(self.open_raw()?))
+    }
+
+    pub fn open_raw(&self) -> Result<Pipe<PipeRead>, PipeError> {
         if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
             pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
@@ -118,11 +126,15 @@ impl UnOpenedPipe<PipeRead> {
             marker: std::marker::PhantomData,
         };
 
-        Ok(PipeReader::new(pipe))
+        Ok(pipe)
     }
 }
 impl UnOpenedPipe<PipeWrite> {
     pub fn open(&self) -> Result<PipeWriter<'_>, PipeError> {
+        Ok(PipeWriter::new(self.open_raw()?))
+    }
+
+    pub fn open_raw(&self) -> Result<Pipe<PipeWrite>, PipeError> {
         if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
             pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
@@ -136,7 +148,7 @@ impl UnOpenedPipe<PipeWrite> {
             marker: std::marker::PhantomData,
         };
 
-        Ok(PipeWriter::new(pipe))
+        Ok(pipe)
     }
 }
 
@@ -251,12 +263,13 @@ pub enum PipeMode {
     InProcess,
 }
 
-pub struct UniDirectionalPipeOptions {
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct UnidirectionalPipeOptions {
     pub encoding: PipeEncoding,
     pub mode: PipeMode,
 }
 
-impl Default for UniDirectionalPipeOptions {
+impl Default for UnidirectionalPipeOptions {
     fn default() -> Self {
         Self {
             encoding: PipeEncoding::None,

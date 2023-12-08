@@ -10,7 +10,7 @@ use std::thread;
 
 use log::trace;
 use nu_pipes::unidirectional::{
-    PipeMode, PipeWrite, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
+    PipeMode, PipeWrite, UnOpenedPipe, UnidirectionalPipe, UnidirectionalPipeOptions,
 };
 use nu_pipes::utils::MaybeRawStream;
 use nu_pipes::{PipeEncoding, StreamSender};
@@ -48,7 +48,7 @@ impl PluginDeclaration {
 
         if self.signature.supports_pipelined_input {
             if let Some(stdout) = input.take_stream() {
-                match UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
+                match UnidirectionalPipe::create_from_options(UnidirectionalPipeOptions {
                     encoding: PipeEncoding::Zstd,
                     mode: PipeMode::CrossProcess,
                 }) {

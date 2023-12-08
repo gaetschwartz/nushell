@@ -3057,6 +3057,7 @@ dependencies = [
 name = "nu-pipes"
 version = "0.87.2"
 dependencies = [
+ "bincode",
  "casey",
  "konst",
  "libc",
@@ -3066,6 +3067,7 @@ dependencies = [
  "num_cpus",
  "serde",
  "serde_json",
+ "serde_repr",
  "windows 0.52.0",
  "zstd 0.13.0",
  "zstd-safe 7.0.0",
