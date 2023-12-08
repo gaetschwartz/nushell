@@ -1,11 +1,10 @@
 use std::{
     io::{Read, Seek, Write},
     sync::mpsc::Sender,
-    thread::{JoinHandle, Scope, ScopedJoinHandle},
+    thread::{Scope, ScopedJoinHandle},
 };
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     errors::PipeError,
@@ -18,16 +17,6 @@ use crate::{
 };
 
 /// NXPC (Nu Cross Process Communication)
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum NXPCError {}
-impl std::fmt::Display for NXPCError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
-}
-
-impl std::error::Error for NXPCError {}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 enum PipeState<T: HandleType> {
@@ -55,7 +44,7 @@ struct ThreadData<'scope, 'a: 'scope, T> {
 trait FixedSizedSerialization<const N: usize> {
     fn serialize_fixed_size(&self) -> Result<[u8; N], std::io::Error>;
 
-    fn deserialize_fixed_size(buf: &[u8]) -> Result<Box<Self>, std::io::Error>;
+    fn deserialize_fixed_size(buf: &[u8; N]) -> Result<Box<Self>, std::io::Error>;
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -89,7 +78,7 @@ impl FixedSizedSerialization<128> for ServerCommand {
         Ok(buf)
     }
 
-    fn deserialize_fixed_size(buf: &[u8]) -> Result<Box<Self>, std::io::Error> {
+    fn deserialize_fixed_size(buf: &[u8; 128]) -> Result<Box<Self>, std::io::Error> {
         match buf[0] {
             0 => {
                 let mut pos = [0u8; 8];
@@ -216,60 +205,20 @@ impl<'scope, 'a> NXPCEndpoint<'scope, 'a, NXPCServerRole> {
                 match msg {
                     PipeThreadMessage::Serve(mut served) => {
                         // wait for the client to send a command
-
-                        let mut cmd_buf = [0u8; 128];
-                        let mut cmd_read = 0;
-                        loop {
-                            let r = reader.read(&mut cmd_buf[cmd_read..])?;
-                            if r == 0 {
-                                break;
-                            }
-                            cmd_read += r;
-                            if cmd_read == 128 {
-                                break;
-                            }
-                        }
-                        let cmd = ServerCommand::deserialize_fixed_size(&cmd_buf[..cmd_read])
-                            .unwrap_or_else(|_| {
-                                panic!("Failed to deserialize command: {:?}", &cmd_buf[..cmd_read])
-                            });
+                        let cmd_buf: [u8; 128] = reader.read_exact_buf()?;
+                        let cmd = ServerCommand::deserialize_fixed_size(&cmd_buf)?;
                         match *cmd {
                             // 0: Seek, 1: Read, 2: ReadAll, 3: Close
                             ServerCommand::Skip(amt) => {
                                 served.skip(amt)?;
                             }
                             ServerCommand::Read(to_read) => {
-                                let mut buf = [0u8; 4096];
-
-                                let mut read = 0;
-                                loop {
-                                    let r = served.read(&mut buf[read..])?;
-                                    if r == 0 {
-                                        break;
-                                    }
-                                    read += r;
-                                    if read == to_read as usize {
-                                        break;
-                                    }
-                                    let written = writer.write(&buf[..read])?;
-                                    if written != read {
-                                        panic!("Failed to write all bytes");
-                                    }
-                                }
+                                let mut bufreader = std::io::BufReader::new(served.take(to_read));
+                                std::io::copy(&mut bufreader, &mut writer)?;
                             }
                             ServerCommand::ReadAll => {
-                                let mut buf = [0u8; 4096];
-
-                                loop {
-                                    let r = served.read(&mut buf[..])?;
-                                    if r == 0 {
-                                        break;
-                                    }
-                                    let written = writer.write(&buf[..r])?;
-                                    if written != r {
-                                        panic!("Failed to write all bytes");
-                                    }
-                                }
+                                let mut bufreader = std::io::BufReader::new(served);
+                                std::io::copy(&mut bufreader, &mut writer)?;
                             }
                             ServerCommand::Close => break,
                         }
@@ -309,5 +258,17 @@ impl<'sscope, 'sa> NXPCEndpoint<'sscope, 'sa, NXPCServerRole> {
             unreachable!()
         }
         Ok(())
+    }
+}
+
+trait ReadExactBuf<const N: usize>: Read {
+    fn read_exact_buf(&mut self) -> Result<[u8; N], std::io::Error>;
+}
+
+impl<const N: usize, R: Read> ReadExactBuf<N> for R {
+    fn read_exact_buf(&mut self) -> Result<[u8; N], std::io::Error> {
+        let mut buf = [0u8; N];
+        self.read_exact(&mut buf)?;
+        Ok(buf)
     }
 }
