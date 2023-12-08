@@ -61,7 +61,7 @@ trait FixedSizedSerialization<const N: usize> {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 /// Fixed size of 128 bytes
 enum ServerCommand {
-    Seek(u64), // 0
+    Skip(u64), // 0
     Read(u64), // 1
     ReadAll,   // 2
     Close,     // 3
@@ -71,7 +71,7 @@ impl FixedSizedSerialization<128> for ServerCommand {
     fn serialize_fixed_size(&self) -> Result<[u8; 128], std::io::Error> {
         let mut buf = [0u8; 128];
         match self {
-            ServerCommand::Seek(pos) => {
+            ServerCommand::Skip(pos) => {
                 buf[0] = 0;
                 buf[1..9].copy_from_slice(&pos.to_be_bytes());
             }
@@ -94,7 +94,7 @@ impl FixedSizedSerialization<128> for ServerCommand {
             0 => {
                 let mut pos = [0u8; 8];
                 pos.copy_from_slice(&buf[1..9]);
-                Ok(Box::new(ServerCommand::Seek(u64::from_be_bytes(pos))))
+                Ok(Box::new(ServerCommand::Skip(u64::from_be_bytes(pos))))
             }
             1 => {
                 let mut pos = [0u8; 8];
@@ -117,7 +117,7 @@ pub struct NXPCEndpoint<'scope, 'a: 'scope, T: NXPCRole> {
     write: PipeState<PipeWrite>,
     marker: std::marker::PhantomData<&'a T>,
     #[serde(skip, default)]
-    thread: Option<ThreadData<'scope, 'a, Result<(), PipeError>>>,
+    thread: Option<ThreadData<'scope, 'a, Result<(), std::io::Error>>>,
 }
 
 pub struct BidirectionalPipe<'scope, 'a> {
@@ -152,8 +152,22 @@ impl<'scope, 'a> BidirectionalPipe<'scope, 'a> {
 }
 
 trait MaybeSeekable: Read {
-    fn seekable(&self) -> bool;
-    fn seek(&mut self, pos: u64) -> Result<(), PipeError>;
+    fn seekable(&self) -> bool {
+        false
+    }
+    fn skip(&mut self, pos: u64) -> Result<u64, std::io::Error> {
+        std::io::copy(&mut self.take(pos), &mut std::io::sink())
+    }
+}
+
+impl<T: Read + Seek> MaybeSeekable for T {
+    fn seekable(&self) -> bool {
+        true
+    }
+
+    fn skip(&mut self, pos: u64) -> Result<u64, std::io::Error> {
+        self.seek(std::io::SeekFrom::Current(pos as i64))
+    }
 }
 
 impl<'scope, T: NXPCRole> NXPCEndpoint<'scope, '_, T> {
@@ -190,7 +204,7 @@ impl<'scope, 'a> NXPCEndpoint<'scope, 'a, NXPCServerRole> {
             unreachable!()
         };
         let (w, r) = (w.clone(), r.clone());
-        let handle: ScopedJoinHandle<'scope, Result<(), PipeError>> = scope.spawn(move || {
+        let handle: ScopedJoinHandle<'scope, Result<(), std::io::Error>> = scope.spawn(move || {
             let mut writer = PipeWriter::new(w);
             let mut reader = PipeReader::new(r);
             let rx = rx;
@@ -206,7 +220,7 @@ impl<'scope, 'a> NXPCEndpoint<'scope, 'a, NXPCServerRole> {
                         let mut cmd_buf = [0u8; 128];
                         let mut cmd_read = 0;
                         loop {
-                            let r = reader.read(&mut cmd_buf[cmd_read..]).unwrap();
+                            let r = reader.read(&mut cmd_buf[cmd_read..])?;
                             if r == 0 {
                                 break;
                             }
@@ -221,17 +235,15 @@ impl<'scope, 'a> NXPCEndpoint<'scope, 'a, NXPCServerRole> {
                             });
                         match *cmd {
                             // 0: Seek, 1: Read, 2: ReadAll, 3: Close
-                            ServerCommand::Seek(pos) => {
-                                if served.seekable() {
-                                    served.seek(pos).unwrap();
-                                }
+                            ServerCommand::Skip(amt) => {
+                                served.skip(amt)?;
                             }
                             ServerCommand::Read(to_read) => {
                                 let mut buf = [0u8; 4096];
 
                                 let mut read = 0;
                                 loop {
-                                    let r = served.read(&mut buf[read..]).unwrap();
+                                    let r = served.read(&mut buf[read..])?;
                                     if r == 0 {
                                         break;
                                     }
@@ -239,7 +251,7 @@ impl<'scope, 'a> NXPCEndpoint<'scope, 'a, NXPCServerRole> {
                                     if read == to_read as usize {
                                         break;
                                     }
-                                    let written = writer.write(&buf[..read]).unwrap();
+                                    let written = writer.write(&buf[..read])?;
                                     if written != read {
                                         panic!("Failed to write all bytes");
                                     }
@@ -249,11 +261,11 @@ impl<'scope, 'a> NXPCEndpoint<'scope, 'a, NXPCServerRole> {
                                 let mut buf = [0u8; 4096];
 
                                 loop {
-                                    let r = served.read(&mut buf[..]).unwrap();
+                                    let r = served.read(&mut buf[..])?;
                                     if r == 0 {
                                         break;
                                     }
-                                    let written = writer.write(&buf[..r]).unwrap();
+                                    let written = writer.write(&buf[..r])?;
                                     if written != r {
                                         panic!("Failed to write all bytes");
                                     }
