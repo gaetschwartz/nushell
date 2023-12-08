@@ -1,4 +1,5 @@
 mod errors;
+mod nxpc;
 mod os_pipes;
 mod pipe_custom_value;
 mod serve;

@@ -3065,6 +3065,7 @@ dependencies = [
  "nu-engine",
  "nu-protocol",
  "num_cpus",
+ "rmp-serde",
  "serde",
  "serde_json",
  "serde_repr",

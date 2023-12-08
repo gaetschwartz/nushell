@@ -102,7 +102,7 @@ impl std::io::Write for PipeWriter<'_> {
     }
 }
 
-trait FinishableWrite: std::io::Write {
+trait FinishableWrite: std::io::Write + Send {
     type Inner: Sized;
 
     fn finish(self: Box<Self>) -> Result<(), std::io::Error>;
