@@ -120,6 +120,48 @@ fn pipe_in_another_thread() {
     assert_eq!(&buf[..read], "hello world".as_bytes());
 }
 
+trait ReadExact: Read {
+    fn read_exact_vec<const N: usize>(&mut self) -> Result<[u8; N], std::io::Error> {
+        let mut buf = [0u8; N];
+        self.read_exact(&mut buf)?;
+        Ok(buf)
+    }
+}
+impl<R: Read> ReadExact for R {}
+
+#[test]
+fn pipe_in_another_thread_cancelled() {
+    let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
+
+    let thread: std::thread::JoinHandle<Result<(), std::io::Error>> =
+        utils::named_thread("thread@pipe_in_another_thread_cancelled", move || {
+            let mut writer = write.open().unwrap();
+
+            // serialize the pipe
+            loop {
+                _ = writer.write("hello world".as_bytes())?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        })
+        .unwrap();
+
+    let mut reader = read.open().unwrap();
+    let s1 = reader.read_exact_vec::<11>().unwrap();
+    assert_eq!(&s1[..], "hello world".as_bytes());
+    let s2 = reader.read_exact_vec::<11>().unwrap();
+    assert_eq!(&s2[..], "hello world".as_bytes());
+    reader.close().unwrap();
+    let joined = thread.join().unwrap();
+    println!("This error is expected: {:?}", joined);
+    match joined {
+        Ok(_) => panic!("Thread should have been cancelled"),
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::BrokenPipe => {}
+            _ => panic!("Unexpected error: {:?}", e),
+        },
+    }
+}
+
 #[test]
 fn test_pipe_in_another_process() {
     println!("Compiling pipe_echoer...");
