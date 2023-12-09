@@ -8,7 +8,6 @@ use crate::{
 
 const BUFFER_CAPACITY: usize = 16 * 1024 * 1024;
 const ZSTD_COMPRESSION_LEVEL: i32 = 12;
-const ZSTD_WINDOW_LOG: u32 = 30;
 const ZSTD_ENABLE_MULTITHREAD: bool = true;
 
 /// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
@@ -29,7 +28,6 @@ impl<'p> PipeWriter<'p> {
                         if ZSTD_ENABLE_MULTITHREAD {
                             enc.multithread(num_cpus::get() as u32 - 1)?;
                         }
-                        enc.window_log(ZSTD_WINDOW_LOG)?;
                         Ok(enc)
                     });
                     match encoder {
@@ -160,8 +158,7 @@ impl PipeReader {
         let reader: Box<dyn std::io::Read + Send> = match encoding {
             PipeEncoding::Zstd => {
                 let decoder = catch_result::<_, std::io::Error, _>(|| {
-                    let mut dec = zstd::stream::Decoder::new(pipe.clone())?;
-                    dec.window_log_max(ZSTD_WINDOW_LOG)?;
+                    let dec = zstd::stream::Decoder::new(pipe.clone())?;
                     Ok(dec)
                 });
                 match decoder {
