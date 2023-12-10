@@ -24,6 +24,12 @@ pub struct UnOpenedPipe<T: HandleType> {
     pub(crate) ty: T,
 }
 
+impl<T: HandleType> UnOpenedPipe<T> {
+    pub fn close(&self) -> Result<(), PipeError> {
+        pipe_impl::PipeImpl::close_handle(&self.handle)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Pipe<T: HandleType> {
     pub(crate) datatype: StreamDataType,

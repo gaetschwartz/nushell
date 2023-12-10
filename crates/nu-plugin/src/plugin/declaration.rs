@@ -239,9 +239,8 @@ impl Command for PluginDeclaration {
 
             if let Some(join_handle) = join_handle {
                 join_handle.join().map_err(|_| {
-                    let decl = engine_state.get_decl(call.decl_id);
                     ShellError::GenericError(
-                        format!("Unable to join thread for {}", decl.name()),
+                        format!("Unable to join thread for {}", &self.name),
                         "Unable to join thread".into(),
                         Some(call.head),
                         None,

@@ -54,8 +54,7 @@ impl PipeImplBase for Win32PipeImpl {
                 Some(&DEFAULT_SECURITY_ATTRIBUTES),
                 0,
             )
-        }
-        .map_err(PipeError::FailedToCreatePipe)?;
+        }?;
         let read_handle = Handle::Read(read_handle);
         let write_handle = Handle::Write(write_handle);
 
@@ -79,8 +78,8 @@ impl PipeImplBase for Win32PipeImpl {
 
     fn close_handle(handle: &Handle) -> PipeResult<()> {
         trace_pipe!("closing {:?}", handle);
-        unsafe { CloseHandle(handle.native()) }
-            .map_err(|e| PipeError::FailedToCloseHandle(*handle, e))
+        unsafe { CloseHandle(handle.native()) }?;
+        Ok(())
     }
 
     fn read_handle(handle: &Handle, buf: &mut [u8]) -> PipeResult<usize> {
@@ -92,7 +91,7 @@ impl PipeImplBase for Win32PipeImpl {
         match res {
             Ok(_) => Ok(bytes_read as usize),
             Err(e) if e.code() == ERROR_BROKEN_PIPE => Ok(0),
-            Err(e) => Err(PipeError::FailedToRead(*handle, e)),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -105,8 +104,7 @@ impl PipeImplBase for Win32PipeImpl {
         // );
 
         let mut bytes_written = 0;
-        unsafe { WriteFile(handle.native(), Some(buf), Some(&mut bytes_written), None) }
-            .map_err(|e| PipeError::FailedToWrite(*handle, e))?;
+        unsafe { WriteFile(handle.native(), Some(buf), Some(&mut bytes_written), None) }?;
 
         // println!("OsPipe::write: {} bytes", bytes_written);
 

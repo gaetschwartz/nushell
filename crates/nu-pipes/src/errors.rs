@@ -79,9 +79,62 @@ impl OSErrorKind {
     }
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
+impl From<windows::core::Error> for OSErrorKind {
+    fn from(error: windows::core::Error) -> Self {
+        let Some(error) = windows::Win32::Foundation::WIN32_ERROR::from_error(&error) else {
+            return OSErrorKind::None;
+        };
+        OSErrorKind::from(error)
+    }
+}
+
+#[cfg(windows)]
+impl From<windows::core::Error> for PipeError {
+    fn from(error: windows::core::Error) -> Self {
+        Self {
+            message: error.message().to_string(),
+            kind: OSErrorKind::from(error),
+        }
+    }
+}
+
+#[cfg(windows)]
+impl From<windows::Win32::Foundation::WIN32_ERROR> for OSErrorKind {
+    fn from(error: windows::Win32::Foundation::WIN32_ERROR) -> Self {
+        match error {
+            windows::Win32::Foundation::ERROR_SUCCESS => OSErrorKind::None,
+            windows::Win32::Foundation::ERROR_ACCESS_DENIED => OSErrorKind::AccessDenied,
+            windows::Win32::Foundation::ERROR_BAD_FILE_TYPE => OSErrorKind::BadFileDescriptor,
+            windows::Win32::Foundation::ERROR_FILE_EXISTS => OSErrorKind::FileExists,
+            windows::Win32::Foundation::ERROR_INVALID_DATA => OSErrorKind::InvalidInput,
+            windows::Win32::Foundation::ERROR_TOO_MANY_OPEN_FILES => OSErrorKind::TooManyOpenFiles,
+            windows::Win32::Foundation::ERROR_NOT_ENOUGH_MEMORY => {
+                OSErrorKind::TooManyOpenFilesInSystem
+            }
+            windows::Win32::Foundation::ERROR_FILE_NOT_FOUND => OSErrorKind::FileNotFound,
+            windows::Win32::Foundation::ERROR_DISK_FULL => OSErrorKind::NoSpace,
+            windows::Win32::Foundation::ERROR_NOT_CONNECTED => OSErrorKind::NotConnected,
+            windows::Win32::Foundation::ERROR_BROKEN_PIPE => OSErrorKind::BrokenPipe,
+            windows::Win32::Foundation::ERROR_NO_DATA => OSErrorKind::BrokenPipe,
+            windows::Win32::Foundation::ERROR_CONNECTION_ABORTED => OSErrorKind::ConnectionAborted,
+            windows::Win32::Foundation::ERROR_CONNECTION_REFUSED => OSErrorKind::ConnectionRefused,
+            windows::Win32::Foundation::ERROR_ADDRESS_ALREADY_ASSOCIATED => {
+                OSErrorKind::AddressInUse
+            }
+            windows::Win32::Foundation::ERROR_ADDRESS_NOT_ASSOCIATED => {
+                OSErrorKind::AddressNotAvailable
+            }
+            windows::Win32::Foundation::ERROR_CONNECTION_INVALID => OSErrorKind::NotSocket,
+            windows::Win32::Foundation::ERROR_CONNECTION_ACTIVE => OSErrorKind::AlreadyConnected,
+            _ => OSErrorKind::Unknown(error.0 as i32),
+        }
+    }
+}
+
 impl From<i32> for OSErrorKind {
     fn from(code: i32) -> Self {
+        #[cfg(unix)]
         match code {
             libc::EACCES => OSErrorKind::AccessDenied,
             libc::EBADF => OSErrorKind::BadFileDescriptor,
@@ -106,16 +159,8 @@ impl From<i32> for OSErrorKind {
             libc::EMSGSIZE => OSErrorKind::MessageTooLong,
             e => OSErrorKind::Unknown(e),
         }
-    }
-}
-
-/// Using windows crate and HRESULT codes
-#[cfg(windows)]
-impl From<i32> for OSErrorKind {
-    fn from(code: i32) -> Self {
-        match code {
-            windows::Win32::Foundation::E_ACCESSDENIED => OSErrorKind::AccessDenied,
-        }
+        #[cfg(windows)]
+        windows::Win32::Foundation::WIN32_ERROR(code as u32).into()
     }
 }
 
