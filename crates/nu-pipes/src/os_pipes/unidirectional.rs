@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     io::{PipeReader, PipeWriter},
     os_pipes::{pipe_impl, PipeImplBase},
-    Handle, HandleTypeEnum, PipeEncoding, PipeError,
+    Handle, HandleTypeEnum, PipeError,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -16,7 +16,6 @@ pub enum PipeDirection {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct UnOpenedPipe<T: HandleType> {
     pub datatype: StreamDataType,
-    pub encoding: PipeEncoding,
 
     pub(crate) handle: Handle,
     pub(crate) other_handle: Handle,
@@ -33,7 +32,6 @@ impl<T: HandleType> UnOpenedPipe<T> {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Pipe<T: HandleType> {
     pub(crate) datatype: StreamDataType,
-    pub(crate) encoding: PipeEncoding,
 
     pub(crate) handle: Handle,
     pub(crate) mode: PipeMode,
@@ -44,7 +42,6 @@ impl<T: HandleType> Pipe<T> {
     pub fn invalid() -> Self {
         Self {
             datatype: StreamDataType::Binary,
-            encoding: PipeEncoding::None,
             #[cfg(windows)]
             handle: Handle(
                 windows::Win32::Foundation::INVALID_HANDLE_VALUE,
@@ -69,7 +66,6 @@ pub fn pipe(
 
     let rp = UnOpenedPipe {
         datatype: StreamDataType::Binary,
-        encoding: arg.encoding,
         handle: pipe.read_handle,
         other_handle: pipe.write_handle,
         mode: arg.mode,
@@ -77,7 +73,6 @@ pub fn pipe(
     };
     let wp = UnOpenedPipe {
         datatype: StreamDataType::Binary,
-        encoding: arg.encoding,
         handle: pipe.write_handle,
         other_handle: pipe.read_handle,
         mode: arg.mode,
@@ -103,7 +98,6 @@ impl UnOpenedPipe<PipeRead> {
         }
         let pipe = Pipe {
             datatype: self.datatype,
-            encoding: self.encoding,
             handle: self.handle,
             mode: self.mode,
             marker: std::marker::PhantomData,
@@ -113,7 +107,7 @@ impl UnOpenedPipe<PipeRead> {
     }
 }
 impl UnOpenedPipe<PipeWrite> {
-    pub fn open(&self) -> Result<PipeWriter<'_>, PipeError> {
+    pub fn open(&self) -> Result<PipeWriter, PipeError> {
         if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
             pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
@@ -121,7 +115,6 @@ impl UnOpenedPipe<PipeWrite> {
 
         let pipe = Pipe {
             datatype: self.datatype,
-            encoding: self.encoding,
             handle: self.handle,
             mode: self.mode,
             marker: std::marker::PhantomData,
@@ -134,10 +127,6 @@ impl UnOpenedPipe<PipeWrite> {
 impl<T: HandleType> Pipe<T> {
     pub fn close(&self) -> Result<(), PipeError> {
         pipe_impl::PipeImpl::close_handle(&self.handle)
-    }
-
-    pub fn encoding(&self) -> PipeEncoding {
-        self.encoding
     }
 
     pub fn mode(&self) -> PipeMode {
@@ -243,20 +232,22 @@ pub enum PipeMode {
 }
 
 pub struct PipeOptions {
-    pub encoding: PipeEncoding,
     pub mode: PipeMode,
 }
 
 impl PipeOptions {
-    pub fn new(encoding: PipeEncoding, mode: PipeMode) -> Self {
-        Self { encoding, mode }
+    pub fn new(mode: PipeMode) -> Self {
+        Self { mode }
     }
+
+    pub const IN_PROCESS: Self = Self {
+        mode: PipeMode::InProcess,
+    };
 }
 
 impl Default for PipeOptions {
     fn default() -> Self {
         Self {
-            encoding: PipeEncoding::None,
             mode: PipeMode::CrossProcess,
         }
     }

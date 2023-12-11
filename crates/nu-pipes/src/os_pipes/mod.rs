@@ -80,7 +80,6 @@ impl From<Handle> for InnerHandleType {
 pub trait HandleIO {
     /// Returns the handle of the object.
     fn handle(&self) -> Handle;
-    fn encoding(&self) -> PipeEncoding;
 }
 
 pub trait AsNativeHandle {
@@ -100,23 +99,15 @@ impl<T: HandleIO> AsNativeHandle for T {
     }
 }
 
-impl HandleIO for PipeWriter<'_> {
+impl HandleIO for PipeWriter {
     fn handle(&self) -> Handle {
         self.pipe.handle
-    }
-
-    fn encoding(&self) -> PipeEncoding {
-        self.pipe.encoding
     }
 }
 
 impl HandleIO for PipeReader {
     fn handle(&self) -> Handle {
         self.pipe.handle
-    }
-
-    fn encoding(&self) -> PipeEncoding {
-        self.pipe.encoding
     }
 }
 
@@ -132,21 +123,5 @@ impl std::fmt::Display for Handle {
         #[cfg(unix)]
         let handle = self.0;
         write!(f, "{:?} ({})", self.1, handle)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PipeEncoding {
-    Zstd,
-    None,
-}
-
-impl PipeEncoding {
-    #[inline(always)]
-    pub fn recommended_input_size(&self) -> usize {
-        match self {
-            PipeEncoding::Zstd => zstd_safe::DCtx::in_size(),
-            PipeEncoding::None => 16 * 1024,
-        }
     }
 }

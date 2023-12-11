@@ -1,54 +1,21 @@
 use std::io::{BufReader, BufWriter, Write};
 
-use konst::{primitive::parse_i32, unwrap_ctx};
-use log::trace;
-
 use crate::{
     unidirectional::{Pipe, PipeRead, PipeWrite},
-    utils::catch_result,
-    Closeable, PipeEncoding,
+    Closeable,
 };
 
-const BUFFER_CAPACITY: usize = 128 * 1024;
-const ZSTD_COMPRESSION_LEVEL: i32 = if let Some(n) = option_env!("ZSTD_COMPRESSION_LEVEL") {
-    unwrap_ctx!(parse_i32(n))
-} else {
-    3
-};
-const ZSTD_ENABLE_MULTITHREAD: bool = false;
+pub const PIPE_BUFFER_CAPACITY: usize = 128 * 1024;
 
 /// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
-pub struct PipeWriter<'p> {
+pub struct PipeWriter {
     pub(crate) pipe: Pipe<PipeWrite>,
-    writer: Option<Box<dyn FinishableWrite<Inner = Pipe<PipeWrite>> + 'p>>,
+    writer: Option<BufWriter<Pipe<PipeWrite>>>,
 }
 
-impl<'p> PipeWriter<'p> {
+impl PipeWriter {
     pub fn new(pipe: Pipe<PipeWrite>) -> Self {
-        let encoding = pipe.encoding();
-        let finishable_write: Box<dyn FinishableWrite<Inner = Pipe<PipeWrite>> + 'p> =
-            match encoding {
-                PipeEncoding::Zstd => {
-                    let encoder = catch_result::<_, std::io::Error, _>(|| {
-                        let mut enc =
-                            zstd::stream::Encoder::new(pipe.clone(), ZSTD_COMPRESSION_LEVEL)?;
-                        if ZSTD_ENABLE_MULTITHREAD {
-                            enc.multithread(num_cpus::get() as u32 - 1)?;
-                        }
-                        Ok(enc)
-                    });
-                    match encoder {
-                        Ok(encoder) => Box::new(encoder),
-                        Err(e) => {
-                            trace!("failed to create zstd encoder, falling back to raw ({})", e);
-                            Box::new(pipe.clone())
-                        }
-                    }
-                }
-                PipeEncoding::None => {
-                    Box::new(BufWriter::with_capacity(BUFFER_CAPACITY, pipe.clone()))
-                }
-            };
+        let finishable_write = BufWriter::with_capacity(PIPE_BUFFER_CAPACITY, pipe.clone());
         Self {
             pipe,
             writer: Some(finishable_write),
@@ -88,7 +55,7 @@ impl<'p> PipeWriter<'p> {
     }
 }
 
-impl std::io::Write for PipeWriter<'_> {
+impl std::io::Write for PipeWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.writer.as_mut().map_or(
             Err(std::io::Error::new(
@@ -112,37 +79,24 @@ impl std::io::Write for PipeWriter<'_> {
 trait FinishableWrite: std::io::Write {
     type Inner: Sized;
 
-    fn finish(self: Box<Self>) -> Result<(), std::io::Error>;
+    fn finish(self) -> Result<(), std::io::Error>;
 
     fn set_pledged_src_size(&mut self, _size: Option<u64>) -> Result<(), std::io::Error> {
         Ok(())
     }
 }
 
-impl FinishableWrite for zstd::stream::Encoder<'_, Pipe<PipeWrite>> {
-    fn finish(self: Box<Self>) -> Result<(), std::io::Error> {
-        zstd::stream::Encoder::finish(*self)?;
-        Ok(())
-    }
-
-    fn set_pledged_src_size(&mut self, size: Option<u64>) -> Result<(), std::io::Error> {
-        zstd::stream::Encoder::set_pledged_src_size(self, size)
-    }
-
-    type Inner = Pipe<PipeWrite>;
-}
-
 impl FinishableWrite for Pipe<PipeWrite> {
     type Inner = Pipe<PipeWrite>;
 
     #[inline(always)]
-    fn finish(self: Box<Self>) -> Result<(), std::io::Error> {
+    fn finish(self) -> Result<(), std::io::Error> {
         Ok(())
     }
 }
 
 impl<W: FinishableWrite> FinishableWrite for BufWriter<W> {
-    fn finish(mut self: Box<Self>) -> Result<(), std::io::Error> {
+    fn finish(mut self) -> Result<(), std::io::Error> {
         self.flush()?;
         Box::new(self.into_inner()?).finish()
     }
@@ -156,7 +110,7 @@ impl<W: FinishableWrite> FinishableWrite for BufWriter<W> {
 
 /// A struct representing a handle reader.
 pub struct PipeReader {
-    pub(crate) reader: Box<dyn std::io::Read + Send>,
+    pub(crate) reader: BufReader<Pipe<PipeRead>>,
     pub pipe: Pipe<PipeRead>,
 }
 
@@ -176,24 +130,7 @@ impl std::fmt::Debug for PipeReader {
 
 impl PipeReader {
     pub fn new(pipe: Pipe<PipeRead>) -> Self {
-        let encoding = pipe.encoding();
-
-        let reader: Box<dyn std::io::Read + Send> = match encoding {
-            PipeEncoding::Zstd => {
-                let decoder = catch_result::<_, std::io::Error, _>(|| {
-                    let dec = zstd::stream::Decoder::new(pipe.clone())?;
-                    Ok(dec)
-                });
-                match decoder {
-                    Ok(decoder) => Box::new(decoder),
-                    Err(e) => {
-                        trace!("failed to create zstd decoder, falling back to raw ({})", e);
-                        Box::new(BufReader::with_capacity(BUFFER_CAPACITY, pipe.clone()))
-                    }
-                }
-            }
-            PipeEncoding::None => Box::new(BufReader::with_capacity(BUFFER_CAPACITY, pipe.clone())),
-        };
+        let reader = BufReader::with_capacity(PIPE_BUFFER_CAPACITY, pipe.clone());
 
         Self { reader, pipe }
     }
@@ -224,7 +161,7 @@ impl Closeable for PipeReader {
     }
 }
 
-impl Closeable for PipeWriter<'_> {
+impl Closeable for PipeWriter {
     fn close(&mut self) -> Result<(), std::io::Error> {
         Self::close(self)
     }

@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use log::trace;
-use nu_pipes::unidirectional::{pipe, PipeMode, PipeOptions, PipeWrite, UnOpenedPipe};
+use nu_pipes::unidirectional::{pipe, PipeOptions, PipeWrite, UnOpenedPipe};
 use nu_pipes::utils::MaybeRawStream;
-use nu_pipes::{PipeEncoding, StreamSender};
+use nu_pipes::StreamSender;
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::{ast::Call, PluginSignature, Signature};
 use nu_protocol::{Example, PipelineData, RawStream, ShellError, Value};
@@ -46,10 +46,7 @@ impl PluginDeclaration {
 
         if self.signature.supports_pipelined_input {
             if let Some(stdout) = input.take_stream() {
-                match pipe(PipeOptions {
-                    encoding: PipeEncoding::None,
-                    mode: PipeMode::CrossProcess,
-                }) {
+                match pipe(PipeOptions::default()) {
                     Ok((pr, pw)) => {
                         return Ok((CallInput::Pipe(pr), Some((pw, stdout))));
                     }

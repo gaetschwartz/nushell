@@ -1,5 +1,5 @@
 use nu_engine::{current_dir, eval_block, CallExt};
-use nu_pipes::PipeEncoding;
+use nu_pipes::io::PIPE_BUFFER_CAPACITY;
 use nu_protocol::ast::Call;
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::util::BufferedReader;
@@ -157,8 +157,7 @@ impl Command for Open {
                         }
                     };
 
-                    let buf_reader =
-                        BufReader::with_capacity(PipeEncoding::Zstd.recommended_input_size(), file);
+                    let buf_reader = BufReader::with_capacity(PIPE_BUFFER_CAPACITY, file);
 
                     let file_contents = PipelineData::ExternalStream {
                         stdout: Some(RawStream::new(

@@ -4,16 +4,12 @@ use std::{
 };
 
 use nu_pipes::{
-    unidirectional::{pipe, PipeMode, PipeOptions, PipeRead, PipeWrite, UnOpenedPipe},
-    utils, PipeEncoding,
+    unidirectional::{pipe, PipeOptions, PipeRead, PipeWrite, UnOpenedPipe},
+    utils,
 };
 
 fn in_process() -> (UnOpenedPipe<PipeRead>, UnOpenedPipe<PipeWrite>) {
-    pipe(PipeOptions {
-        encoding: PipeEncoding::None,
-        mode: PipeMode::InProcess,
-    })
-    .unwrap()
+    pipe(PipeOptions::IN_PROCESS).unwrap()
 }
 
 trait ReadAsString {
@@ -177,7 +173,7 @@ fn test_pipe_in_another_process() {
         .wait()
         .unwrap();
 
-    let (read, write) = pipe(PipeOptions::new(PipeEncoding::None, PipeMode::CrossProcess)).unwrap();
+    let (read, write) = pipe(PipeOptions::default()).unwrap();
 
     println!("read: {:?}", read);
     println!("write: {:?}", write);
