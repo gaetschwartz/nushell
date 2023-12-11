@@ -58,47 +58,32 @@ impl<T: HandleType> Pipe<T> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct UnidirectionalPipe {
-    pub read: UnOpenedPipe<PipeRead>,
-    pub write: UnOpenedPipe<PipeWrite>,
-}
+/// Creates a new pipe. Pipes are unidirectional streams of bytes composed of a read end and a write end. They can be used for interprocess communication.
+/// Uses `pipe(2)` on unix and `CreatePipe` on windows.
+pub fn pipe(
+    arg: PipeOptions,
+) -> Result<(UnOpenedPipe<PipeRead>, UnOpenedPipe<PipeWrite>), PipeError> {
+    let pipe = pipe_impl::PipeImpl::create_pipe()?;
+    assert!(pipe.write_handle.1 == HandleTypeEnum::Write);
+    assert!(pipe.read_handle.1 == HandleTypeEnum::Read);
 
-impl UnidirectionalPipe {
-    /// Creates a new pipe. Pipes are unidirectional streams of bytes composed of a read end and a write end. They can be used for interprocess communication.
-    /// Uses `pipe(2)` on unix and `CreatePipe` on windows.
-    pub fn create_default() -> Result<Self, PipeError> {
-        Self::create_from_options(UniDirectionalPipeOptions::default())
-    }
-
-    pub fn create_from_options(
-        arg: UniDirectionalPipeOptions,
-    ) -> Result<UnidirectionalPipe, PipeError> {
-        let pipe = pipe_impl::PipeImpl::create_pipe()?;
-        assert!(pipe.write_handle.1 == HandleTypeEnum::Write);
-        assert!(pipe.read_handle.1 == HandleTypeEnum::Read);
-
-        let rp = UnOpenedPipe {
-            datatype: StreamDataType::Binary,
-            encoding: arg.encoding,
-            handle: pipe.read_handle,
-            other_handle: pipe.write_handle,
-            mode: arg.mode,
-            ty: PipeRead(std::marker::PhantomData),
-        };
-        let wp = UnOpenedPipe {
-            datatype: StreamDataType::Binary,
-            encoding: arg.encoding,
-            handle: pipe.write_handle,
-            other_handle: pipe.read_handle,
-            mode: arg.mode,
-            ty: PipeWrite(std::marker::PhantomData),
-        };
-        Ok(UnidirectionalPipe {
-            read: rp,
-            write: wp,
-        })
-    }
+    let rp = UnOpenedPipe {
+        datatype: StreamDataType::Binary,
+        encoding: arg.encoding,
+        handle: pipe.read_handle,
+        other_handle: pipe.write_handle,
+        mode: arg.mode,
+        ty: PipeRead(std::marker::PhantomData),
+    };
+    let wp = UnOpenedPipe {
+        datatype: StreamDataType::Binary,
+        encoding: arg.encoding,
+        handle: pipe.write_handle,
+        other_handle: pipe.read_handle,
+        mode: arg.mode,
+        ty: PipeWrite(std::marker::PhantomData),
+    };
+    Ok((rp, wp))
 }
 
 pub trait HandleIO<T: HandleType> {
@@ -257,12 +242,18 @@ pub enum PipeMode {
     InProcess,
 }
 
-pub struct UniDirectionalPipeOptions {
+pub struct PipeOptions {
     pub encoding: PipeEncoding,
     pub mode: PipeMode,
 }
 
-impl Default for UniDirectionalPipeOptions {
+impl PipeOptions {
+    pub fn new(encoding: PipeEncoding, mode: PipeMode) -> Self {
+        Self { encoding, mode }
+    }
+}
+
+impl Default for PipeOptions {
     fn default() -> Self {
         Self {
             encoding: PipeEncoding::None,

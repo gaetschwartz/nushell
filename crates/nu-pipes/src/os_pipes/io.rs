@@ -1,3 +1,6 @@
+use std::io::{BufReader, BufWriter, Write};
+
+use konst::{primitive::parse_i32, unwrap_ctx};
 use log::trace;
 
 use crate::{
@@ -6,9 +9,13 @@ use crate::{
     Closeable, PipeEncoding,
 };
 
-const BUFFER_CAPACITY: usize = 16 * 1024 * 1024;
-const ZSTD_COMPRESSION_LEVEL: i32 = 12;
-const ZSTD_ENABLE_MULTITHREAD: bool = true;
+const BUFFER_CAPACITY: usize = 128 * 1024;
+const ZSTD_COMPRESSION_LEVEL: i32 = if let Some(n) = option_env!("ZSTD_COMPRESSION_LEVEL") {
+    unwrap_ctx!(parse_i32(n))
+} else {
+    3
+};
+const ZSTD_ENABLE_MULTITHREAD: bool = false;
 
 /// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
 pub struct PipeWriter<'p> {
@@ -38,7 +45,9 @@ impl<'p> PipeWriter<'p> {
                         }
                     }
                 }
-                PipeEncoding::None => Box::new(pipe.clone()),
+                PipeEncoding::None => {
+                    Box::new(BufWriter::with_capacity(BUFFER_CAPACITY, pipe.clone()))
+                }
             };
         Self {
             pipe,
@@ -104,6 +113,7 @@ trait FinishableWrite: std::io::Write {
     type Inner: Sized;
 
     fn finish(self: Box<Self>) -> Result<(), std::io::Error>;
+
     fn set_pledged_src_size(&mut self, _size: Option<u64>) -> Result<(), std::io::Error> {
         Ok(())
     }
@@ -129,6 +139,19 @@ impl FinishableWrite for Pipe<PipeWrite> {
     fn finish(self: Box<Self>) -> Result<(), std::io::Error> {
         Ok(())
     }
+}
+
+impl<W: FinishableWrite> FinishableWrite for BufWriter<W> {
+    fn finish(mut self: Box<Self>) -> Result<(), std::io::Error> {
+        self.flush()?;
+        Box::new(self.into_inner()?).finish()
+    }
+
+    fn set_pledged_src_size(&mut self, size: Option<u64>) -> Result<(), std::io::Error> {
+        self.get_mut().set_pledged_src_size(size)
+    }
+
+    type Inner = W::Inner;
 }
 
 /// A struct representing a handle reader.
@@ -165,17 +188,11 @@ impl PipeReader {
                     Ok(decoder) => Box::new(decoder),
                     Err(e) => {
                         trace!("failed to create zstd decoder, falling back to raw ({})", e);
-                        Box::new(std::io::BufReader::with_capacity(
-                            BUFFER_CAPACITY,
-                            pipe.clone(),
-                        ))
+                        Box::new(BufReader::with_capacity(BUFFER_CAPACITY, pipe.clone()))
                     }
                 }
             }
-            PipeEncoding::None => Box::new(std::io::BufReader::with_capacity(
-                BUFFER_CAPACITY,
-                pipe.clone(),
-            )),
+            PipeEncoding::None => Box::new(BufReader::with_capacity(BUFFER_CAPACITY, pipe.clone())),
         };
 
         Self { reader, pipe }

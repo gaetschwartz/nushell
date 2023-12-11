@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::thread::Scope;
 use std::thread::ScopedJoinHandle;
 
@@ -31,32 +32,55 @@ impl<'a> StreamSender<'a> for UnOpenedPipe<PipeWrite> {
         let handle = std::thread::Builder::new()
             .name("serve_stream".to_owned())
             .spawn_scoped(scope, move || {
+                trace_pipe!("starting to write");
                 let mut writer = self.open().unwrap();
                 if let Some(size) = stdout.known_size {
                     _ = writer.set_pledged_src_size(Some(size));
                 }
                 let mut stdout = stdout;
 
-                match std::io::copy(&mut stdout, &mut writer) {
-                    Ok(_) => {
-                        trace_pipe!("finished writing");
-                    }
-                    Err(e) => {
-                        trace_pipe!("error: failed to write to pipe: {:?}", e);
+                loop {
+                    match stdout.stream.next() {
+                        Some(item) => match item {
+                            Ok(item) => {
+                                trace_pipe!("writing item");
+                                match writer.write_all(&item) {
+                                    Ok(_) => {
+                                        trace_pipe!("wrote {} bytes", item.len());
+                                    }
+                                    Err(e) => {
+                                        trace_pipe!("error: failed to write item: {:?}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                trace_pipe!("error: failed to get item: {:?}", e);
+                            }
+                        },
+                        None => {
+                            trace_pipe!("no more data to write");
+                            break;
+                        }
                     }
                 }
+                trace_pipe!("finished writing, closing pipe");
 
-                match writer.close() {
+                match writer.flush() {
                     Ok(_) => {
-                        trace_pipe!("lushed pipe");
+                        trace_pipe!("flushed pipe");
                     }
                     Err(e) => {
                         trace_pipe!("error: failed to flush pipe: {:?}", e);
                     }
                 }
-
-                trace_pipe!("finished writing, closing pipe");
-                // close the pipe when the stream is finished
+                match writer.close() {
+                    Ok(_) => {
+                        trace_pipe!("closed pipe");
+                    }
+                    Err(e) => {
+                        trace_pipe!("error: failed to close pipe: {:?}", e);
+                    }
+                }
             })
             .expect("failed to spawn thread");
 

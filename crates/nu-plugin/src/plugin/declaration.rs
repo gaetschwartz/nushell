@@ -9,9 +9,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use log::trace;
-use nu_pipes::unidirectional::{
-    PipeMode, PipeWrite, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
-};
+use nu_pipes::unidirectional::{pipe, PipeMode, PipeOptions, PipeWrite, UnOpenedPipe};
 use nu_pipes::utils::MaybeRawStream;
 use nu_pipes::{PipeEncoding, StreamSender};
 use nu_protocol::engine::{Command, EngineState, Stack};
@@ -48,12 +46,12 @@ impl PluginDeclaration {
 
         if self.signature.supports_pipelined_input {
             if let Some(stdout) = input.take_stream() {
-                match UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
-                    encoding: PipeEncoding::Zstd,
+                match pipe(PipeOptions {
+                    encoding: PipeEncoding::None,
                     mode: PipeMode::CrossProcess,
                 }) {
-                    Ok(p) => {
-                        return Ok((CallInput::Pipe(p.read), Some((p.write, stdout))));
+                    Ok((pr, pw)) => {
+                        return Ok((CallInput::Pipe(pr), Some((pw, stdout))));
                     }
                     Err(e) => {
                         trace!("Unable to create pipe for plugin {}: {}", self.name, e);

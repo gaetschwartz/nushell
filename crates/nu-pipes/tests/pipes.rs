@@ -4,24 +4,16 @@ use std::{
 };
 
 use nu_pipes::{
-    unidirectional::{
-        PipeMode, PipeRead, UnOpenedPipe, UniDirectionalPipeOptions, UnidirectionalPipe,
-    },
+    unidirectional::{pipe, PipeMode, PipeOptions, PipeRead, PipeWrite, UnOpenedPipe},
     utils, PipeEncoding,
 };
 
-trait TestPipeExt {
-    fn in_process() -> UnidirectionalPipe;
-}
-
-impl TestPipeExt for UnidirectionalPipe {
-    fn in_process() -> Self {
-        Self::create_from_options(UniDirectionalPipeOptions {
-            encoding: PipeEncoding::None,
-            mode: PipeMode::InProcess,
-        })
-        .unwrap()
-    }
+fn in_process() -> (UnOpenedPipe<PipeRead>, UnOpenedPipe<PipeWrite>) {
+    pipe(PipeOptions {
+        encoding: PipeEncoding::None,
+        mode: PipeMode::InProcess,
+    })
+    .unwrap()
 }
 
 trait ReadAsString {
@@ -41,7 +33,7 @@ fn as_string(r: Option<impl Read>) -> String {
 }
 #[test]
 fn test_pipe() {
-    let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
+    let (read, write) = in_process();
     let mut reader = read.open().unwrap();
     let mut writer = write.open().unwrap();
     // write hello world to the pipe
@@ -61,7 +53,7 @@ fn test_pipe() {
 
 #[test]
 fn test_serialized_pipe() {
-    let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
+    let (read, write) = in_process();
     let mut writer = write.open().unwrap();
     // write hello world to the pipe
     let written = writer.write("hello world".as_bytes()).unwrap();
@@ -88,7 +80,7 @@ fn test_serialized_pipe() {
 
 #[test]
 fn pipe_in_another_thread() {
-    let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
+    let (read, write) = in_process();
     let mut writer = write.open().unwrap();
     // write hello world to the pipe
     let written = writer.write("hello world".as_bytes()).unwrap();
@@ -131,7 +123,7 @@ impl<R: Read> ReadExact for R {}
 
 #[test]
 fn pipe_in_another_thread_cancelled() {
-    let UnidirectionalPipe { read, write } = UnidirectionalPipe::in_process();
+    let (read, write) = in_process();
 
     let thread: std::thread::JoinHandle<Result<(), std::io::Error>> =
         utils::named_thread("thread@pipe_in_another_thread_cancelled", move || {
@@ -139,18 +131,25 @@ fn pipe_in_another_thread_cancelled() {
 
             // serialize the pipe
             loop {
+                eprintln!("Writing to pipe...");
                 _ = writer.write("hello world".as_bytes())?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                writer.flush()?;
             }
         })
         .unwrap();
 
     let mut reader = read.open().unwrap();
+    eprintln!("Starting to read from pipe...");
     let s1 = reader.read_exact_vec::<11>().unwrap();
+    eprintln!("Read from pipe... (1)");
     assert_eq!(&s1[..], "hello world".as_bytes());
+    eprintln!("Read from pipe... (2)");
     let s2 = reader.read_exact_vec::<11>().unwrap();
     assert_eq!(&s2[..], "hello world".as_bytes());
+    eprintln!("Closing pipe...");
     reader.close().unwrap();
+    eprintln!("Joining thread...");
     let joined = thread.join().unwrap();
     println!("This error is expected: {:?}", joined);
     match joined {
@@ -178,12 +177,7 @@ fn test_pipe_in_another_process() {
         .wait()
         .unwrap();
 
-    let UnidirectionalPipe { read, write } =
-        UnidirectionalPipe::create_from_options(UniDirectionalPipeOptions {
-            encoding: PipeEncoding::None,
-            mode: PipeMode::CrossProcess,
-        })
-        .unwrap();
+    let (read, write) = pipe(PipeOptions::new(PipeEncoding::None, PipeMode::CrossProcess)).unwrap();
 
     println!("read: {:?}", read);
     println!("write: {:?}", write);

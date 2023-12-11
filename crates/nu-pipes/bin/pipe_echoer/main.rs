@@ -7,9 +7,16 @@ fn main() {
     let deserialized: UnOpenedPipe<PipeRead> = serde_json::from_str(&serialized).unwrap();
     let mut reader = deserialized.open().unwrap();
 
-    let mut buf = [0u8; 11];
+    let mut buf = vec![];
 
-    _ = reader.read(&mut buf).unwrap();
+    loop {
+        let mut chunk = vec![0u8; 1024];
+        let read = reader.read(&mut chunk).unwrap();
+        if read == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..read]);
+    }
 
     println!("{}", std::str::from_utf8(&buf).unwrap());
 }
