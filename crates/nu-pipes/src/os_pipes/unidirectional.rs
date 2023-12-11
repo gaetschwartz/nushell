@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     io::{PipeReader, PipeWriter},
     os_pipes::{pipe_impl, PipeImplBase},
-    Handle, HandleTypeEnum, PipeError,
+    PipeError, PipeFd, PipeFdType,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -17,15 +17,15 @@ pub enum PipeDirection {
 pub struct UnOpenedPipe<T: HandleType> {
     pub datatype: StreamDataType,
 
-    pub(crate) handle: Handle,
-    pub(crate) other_handle: Handle,
+    pub(crate) fd: PipeFd,
+    pub(crate) other_fd: PipeFd,
     pub mode: PipeMode,
     pub(crate) ty: T,
 }
 
 impl<T: HandleType> UnOpenedPipe<T> {
     pub fn close(&self) -> Result<(), PipeError> {
-        pipe_impl::PipeImpl::close_handle(&self.handle)
+        pipe_impl::PipeImpl::close_pipe(&self.fd)
     }
 }
 
@@ -33,7 +33,7 @@ impl<T: HandleType> UnOpenedPipe<T> {
 pub struct Pipe<T: HandleType> {
     pub(crate) datatype: StreamDataType,
 
-    pub(crate) handle: Handle,
+    pub(crate) fd: PipeFd,
     pub(crate) mode: PipeMode,
     marker: std::marker::PhantomData<T>,
 }
@@ -43,12 +43,12 @@ impl<T: HandleType> Pipe<T> {
         Self {
             datatype: StreamDataType::Binary,
             #[cfg(windows)]
-            handle: Handle(
+            fd: PipeFd(
                 windows::Win32::Foundation::INVALID_HANDLE_VALUE,
-                HandleTypeEnum::Read,
+                PipeFdType::Read,
             ),
             #[cfg(unix)]
-            handle: Handle(-1, HandleTypeEnum::Read),
+            fd: PipeFd(-1, PipeFdType::Read),
             mode: PipeMode::CrossProcess,
             marker: std::marker::PhantomData,
         }
@@ -61,20 +61,20 @@ pub fn pipe(
     arg: PipeOptions,
 ) -> Result<(UnOpenedPipe<PipeRead>, UnOpenedPipe<PipeWrite>), PipeError> {
     let pipe = pipe_impl::PipeImpl::create_pipe()?;
-    assert!(pipe.write_handle.1 == HandleTypeEnum::Write);
-    assert!(pipe.read_handle.1 == HandleTypeEnum::Read);
+    assert!(pipe.write_fd.1 == PipeFdType::Write);
+    assert!(pipe.read_fd.1 == PipeFdType::Read);
 
     let rp = UnOpenedPipe {
         datatype: StreamDataType::Binary,
-        handle: pipe.read_handle,
-        other_handle: pipe.write_handle,
+        fd: pipe.read_fd,
+        other_fd: pipe.write_fd,
         mode: arg.mode,
         ty: PipeRead(std::marker::PhantomData),
     };
     let wp = UnOpenedPipe {
         datatype: StreamDataType::Binary,
-        handle: pipe.write_handle,
-        other_handle: pipe.read_handle,
+        fd: pipe.write_fd,
+        other_fd: pipe.read_fd,
         mode: arg.mode,
         ty: PipeWrite(std::marker::PhantomData),
     };
@@ -94,11 +94,11 @@ impl UnOpenedPipe<PipeRead> {
     pub fn open(&self) -> Result<PipeReader, PipeError> {
         if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
-            pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
+            pipe_impl::PipeImpl::close_pipe(&self.other_fd)?;
         }
         let pipe = Pipe {
             datatype: self.datatype,
-            handle: self.handle,
+            fd: self.fd,
             mode: self.mode,
             marker: std::marker::PhantomData,
         };
@@ -110,12 +110,12 @@ impl UnOpenedPipe<PipeWrite> {
     pub fn open(&self) -> Result<PipeWriter, PipeError> {
         if pipe_impl::PipeImpl::should_close_other_for_mode(self.mode) {
             // close both their ends of the pipe in our process
-            pipe_impl::PipeImpl::close_handle(&self.other_handle)?;
+            pipe_impl::PipeImpl::close_pipe(&self.other_fd)?;
         }
 
         let pipe = Pipe {
             datatype: self.datatype,
-            handle: self.handle,
+            fd: self.fd,
             mode: self.mode,
             marker: std::marker::PhantomData,
         };
@@ -126,7 +126,7 @@ impl UnOpenedPipe<PipeWrite> {
 
 impl<T: HandleType> Pipe<T> {
     pub fn close(&self) -> Result<(), PipeError> {
-        pipe_impl::PipeImpl::close_handle(&self.handle)
+        pipe_impl::PipeImpl::close_pipe(&self.fd)
     }
 
     pub fn mode(&self) -> PipeMode {
@@ -136,13 +136,13 @@ impl<T: HandleType> Pipe<T> {
 
 impl std::io::Read for Pipe<PipeRead> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        Ok(pipe_impl::PipeImpl::read_handle(&self.handle, buf)?)
+        Ok(pipe_impl::PipeImpl::read(&self.fd, buf)?)
     }
 }
 
 impl std::io::Write for Pipe<PipeWrite> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        Ok(pipe_impl::PipeImpl::write_handle(&self.handle, buf)?)
+        Ok(pipe_impl::PipeImpl::write(&self.fd, buf)?)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -151,12 +151,12 @@ impl std::io::Write for Pipe<PipeWrite> {
 }
 impl std::io::Read for &Pipe<PipeRead> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        Ok(pipe_impl::PipeImpl::read_handle(&self.handle, buf)?)
+        Ok(pipe_impl::PipeImpl::read(&self.fd, buf)?)
     }
 }
 impl std::io::Write for &Pipe<PipeWrite> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        Ok(pipe_impl::PipeImpl::write_handle(&self.handle, buf)?)
+        Ok(pipe_impl::PipeImpl::write(&self.fd, buf)?)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {

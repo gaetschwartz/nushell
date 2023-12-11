@@ -76,13 +76,13 @@ impl PipeImplBase for Win32PipeImpl {
     //     )
     // }
 
-    fn close_handle(handle: &Handle) -> PipeResult<()> {
+    fn close_pipe(handle: &Handle) -> PipeResult<()> {
         trace_pipe!("closing {:?}", handle);
         unsafe { CloseHandle(handle.native()) }?;
         Ok(())
     }
 
-    fn read_handle(handle: &Handle, buf: &mut [u8]) -> PipeResult<usize> {
+    fn read(handle: &Handle, buf: &mut [u8]) -> PipeResult<usize> {
         trace_pipe!("Reading from {:?}", handle);
 
         let mut bytes_read = 0;
@@ -95,7 +95,7 @@ impl PipeImplBase for Win32PipeImpl {
         }
     }
 
-    fn write_handle(handle: &Handle, buf: &[u8]) -> PipeResult<usize> {
+    fn write(handle: &Handle, buf: &[u8]) -> PipeResult<usize> {
         // println!(
         //     "{} OsPipe::write for {:?} ({} bytes)",
         //     header(),

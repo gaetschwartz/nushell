@@ -1,9 +1,6 @@
 use std::io::{BufReader, BufWriter, Write};
 
-use crate::{
-    unidirectional::{Pipe, PipeRead, PipeWrite},
-    Closeable,
-};
+use crate::unidirectional::{Pipe, PipeRead, PipeWrite};
 
 pub const PIPE_BUFFER_CAPACITY: usize = 128 * 1024;
 
@@ -152,18 +149,6 @@ impl PipeReader {
 impl std::io::Read for PipeReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.reader.read(buf)
-    }
-}
-
-impl Closeable for PipeReader {
-    fn close(&mut self) -> Result<(), std::io::Error> {
-        Self::close(self)
-    }
-}
-
-impl Closeable for PipeWriter {
-    fn close(&mut self) -> Result<(), std::io::Error> {
-        Self::close(self)
     }
 }
 

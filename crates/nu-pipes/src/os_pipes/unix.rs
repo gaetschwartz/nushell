@@ -1,16 +1,13 @@
 use crate::{errors::PipeResult, trace_pipe, unidirectional::PipeMode};
 
-use super::{Handle, OsPipe, PipeError, PipeImplBase};
-
-pub type InnerHandleType = libc::c_int;
+use super::{OsPipe, PipeError, PipeFd, PipeImplBase};
 
 pub type OSError = std::io::Error;
+pub type NativeFd = libc::c_int;
 
-pub(crate) type PipeImpl = UnixPipeImpl;
+pub(crate) struct PipeImpl {}
 
-pub(crate) struct UnixPipeImpl {}
-
-impl PipeImplBase for UnixPipeImpl {
+impl PipeImplBase for PipeImpl {
     fn create_pipe() -> Result<OsPipe, PipeError> {
         let mut fds: [libc::c_int; 2] = [0; 2];
         let result = unsafe { libc::pipe(fds.as_mut_ptr()) };
@@ -19,12 +16,12 @@ impl PipeImplBase for UnixPipeImpl {
         }
 
         Ok(OsPipe {
-            read_handle: Handle::Read(fds[0]),
-            write_handle: Handle::Write(fds[1]),
+            read_fd: PipeFd::Read(fds[0]),
+            write_fd: PipeFd::Write(fds[1]),
         })
     }
 
-    fn close_handle(handle: &Handle) -> Result<(), PipeError> {
+    fn close_pipe(handle: &PipeFd) -> Result<(), PipeError> {
         trace_pipe!("!!! closing {:?}", handle);
         let res = unsafe { libc::close(handle.native()) };
 
@@ -38,7 +35,7 @@ impl PipeImplBase for UnixPipeImpl {
         Ok(())
     }
 
-    fn read_handle(handle: &Handle, buf: &mut [u8]) -> PipeResult<usize> {
+    fn read(handle: &PipeFd, buf: &mut [u8]) -> PipeResult<usize> {
         trace_pipe!("{:?}", handle);
         let result = unsafe { libc::read(handle.native(), buf.as_mut_ptr() as *mut _, buf.len()) };
         if result < 0 {
@@ -52,7 +49,7 @@ impl PipeImplBase for UnixPipeImpl {
         Ok(result as usize)
     }
 
-    fn write_handle(handle: &Handle, buf: &[u8]) -> PipeResult<usize> {
+    fn write(handle: &PipeFd, buf: &[u8]) -> PipeResult<usize> {
         trace_pipe!("{:?}", handle);
 
         let result = unsafe { libc::write(handle.native(), buf.as_ptr() as *const _, buf.len()) };

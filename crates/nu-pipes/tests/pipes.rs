@@ -109,7 +109,7 @@ fn pipe_in_another_thread() {
 }
 
 trait ReadExact: Read {
-    fn read_exact_vec<const N: usize>(&mut self) -> Result<[u8; N], std::io::Error> {
+    fn read_exactly_n<const N: usize>(&mut self) -> Result<[u8; N], std::io::Error> {
         let mut buf = [0u8; N];
         self.read_exact(&mut buf)?;
         Ok(buf)
@@ -137,12 +137,12 @@ fn pipe_in_another_thread_cancelled() {
 
     let mut reader = read.open().unwrap();
     eprintln!("Starting to read from pipe...");
-    let s1 = reader.read_exact_vec::<11>().unwrap();
+    let s1 = reader.read_exactly_n::<11>().unwrap();
     eprintln!("Read from pipe... (1)");
-    assert_eq!(&s1[..], "hello world".as_bytes());
+    assert_eq!(&s1[..], b"hello world");
     eprintln!("Read from pipe... (2)");
-    let s2 = reader.read_exact_vec::<11>().unwrap();
-    assert_eq!(&s2[..], "hello world".as_bytes());
+    let s2 = reader.read_exactly_n::<11>().unwrap();
+    assert_eq!(&s2[..], b"hello world");
     eprintln!("Closing pipe...");
     reader.close().unwrap();
     eprintln!("Joining thread...");
