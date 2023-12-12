@@ -48,14 +48,6 @@ impl Plugin for FromCmds {
         call: &EvaluatedCall,
         input: PluginPipelineData,
     ) -> Result<Value, LabeledError> {
-        if !matches!(input, PluginPipelineData::ExternalStream(_, _)) {
-            return Err(LabeledError {
-                label: "Plugin call with wrong input type".into(),
-                msg: "expected external stream".into(),
-                span: Some(call.head),
-            });
-        }
-
         let value = input.into_value();
 
         match name {
