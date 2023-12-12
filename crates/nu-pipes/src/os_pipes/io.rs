@@ -1,5 +1,7 @@
 use std::io::{BufReader, BufWriter, Write};
 
+use nu_protocol::StreamDataType;
+
 use crate::unidirectional::{Pipe, PipeRead, PipeWrite};
 
 pub const PIPE_BUFFER_CAPACITY: usize = 128 * 1024;
@@ -141,8 +143,12 @@ impl PipeReader {
         })
     }
 
-    pub fn into_pipe(self) -> Pipe<PipeRead> {
-        self.pipe
+    pub fn pipe(&self) -> &Pipe<PipeRead> {
+        &self.pipe
+    }
+
+    pub fn data_type(&self) -> StreamDataType {
+        self.pipe.datatype
     }
 }
 

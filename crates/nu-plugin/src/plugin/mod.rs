@@ -352,7 +352,14 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                         CallInput::Pipe(pipe) => {
                             readpipe = Some(pipe.clone());
                             if supports_pipelined_input {
-                                Ok(PluginPipelineData::ExternalStream(pipe))
+                                pipe.open()
+                                    .map(|p| {
+                                        PluginPipelineData::ExternalStream(
+                                            p,
+                                            call_info.call.head.into(),
+                                        )
+                                    })
+                                    .map_err(Into::into)
                             } else {
                                 Ok(PluginPipelineData::Value(Value::custom_value(
                                     Box::new(PipeReaderCustomValue::new(pipe, call_info.call.head)),

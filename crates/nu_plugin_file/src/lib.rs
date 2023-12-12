@@ -20,18 +20,14 @@ impl Plugin for FileCmd {
         call: &EvaluatedCall,
         input: PluginPipelineData,
     ) -> Result<Value, LabeledError> {
-        let PluginPipelineData::ExternalStream(val) = input else {
+        let PluginPipelineData::ExternalStream(mut reader, _) = input else {
             return Err(LabeledError {
                 label: "ERROR from plugin".into(),
                 msg: "expected external stream".into(),
                 span: Some(call.head),
             });
         };
-        let mut reader = val.open().map_err(|e| LabeledError {
-            label: "ERROR from plugin".into(),
-            msg: format!("failed to open pipe: {}", e),
-            span: Some(call.head),
-        })?;
+
         let mut vec = vec![];
         loop {
             let mut buf = [0; 4096];

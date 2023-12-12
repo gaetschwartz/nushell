@@ -12,11 +12,11 @@ use windows::{
     },
 };
 
-use crate::{trace_pipe, unidirectional::PipeMode, Handle, OsPipe, PipeResult};
+use crate::{trace_pipe, unidirectional::PipeMode, AsNativeFd, OsPipe, PipeResult};
 
-use super::{PipeError, PipeImplBase};
+use super::{IntoPipeFd, PipeError, PipeImplBase};
 
-pub type InnerHandleType = windows::Win32::Foundation::HANDLE;
+pub type NativeFd = windows::Win32::Foundation::HANDLE;
 pub type OSError = windows::core::Error;
 
 const DEFAULT_SECURITY_ATTRIBUTES: SECURITY_ATTRIBUTES = SECURITY_ATTRIBUTES {
@@ -55,12 +55,12 @@ impl PipeImplBase for Win32PipeImpl {
                 0,
             )
         }?;
-        let read_handle = Handle::Read(read_handle);
-        let write_handle = Handle::Write(write_handle);
+        let read_handle = read_handle.into_pipe_fd();
+        let write_handle = write_handle.into_pipe_fd();
 
         Ok(OsPipe {
-            read_handle,
-            write_handle,
+            read_fd: write_handle,
+            write_fd: read_handle,
         })
     }
 
@@ -76,17 +76,24 @@ impl PipeImplBase for Win32PipeImpl {
     //     )
     // }
 
-    fn close_pipe(handle: &Handle) -> PipeResult<()> {
-        trace_pipe!("closing {:?}", handle);
-        unsafe { CloseHandle(handle.native()) }?;
+    fn close_pipe(handle: impl AsNativeFd) -> PipeResult<()> {
+        trace_pipe!("closing {:?}", handle.as_native_fd());
+        unsafe { CloseHandle(handle.as_native_fd()) }?;
         Ok(())
     }
 
-    fn read(handle: &Handle, buf: &mut [u8]) -> PipeResult<usize> {
-        trace_pipe!("Reading from {:?}", handle);
+    fn read(handle: impl AsNativeFd, buf: &mut [u8]) -> PipeResult<usize> {
+        trace_pipe!("Reading from {:?}", handle.as_native_fd());
 
         let mut bytes_read = 0;
-        let res = unsafe { ReadFile(handle.native(), Some(buf), Some(&mut bytes_read), None) };
+        let res = unsafe {
+            ReadFile(
+                handle.as_native_fd(),
+                Some(buf),
+                Some(&mut bytes_read),
+                None,
+            )
+        };
 
         match res {
             Ok(_) => Ok(bytes_read as usize),
@@ -95,7 +102,7 @@ impl PipeImplBase for Win32PipeImpl {
         }
     }
 
-    fn write(handle: &Handle, buf: &[u8]) -> PipeResult<usize> {
+    fn write(handle: impl AsNativeFd, buf: &[u8]) -> PipeResult<usize> {
         // println!(
         //     "{} OsPipe::write for {:?} ({} bytes)",
         //     header(),
@@ -104,7 +111,14 @@ impl PipeImplBase for Win32PipeImpl {
         // );
 
         let mut bytes_written = 0;
-        unsafe { WriteFile(handle.native(), Some(buf), Some(&mut bytes_written), None) }?;
+        unsafe {
+            WriteFile(
+                handle.as_native_fd(),
+                Some(buf),
+                Some(&mut bytes_written),
+                None,
+            )
+        }?;
 
         // println!("OsPipe::write: {} bytes", bytes_written);
 
@@ -117,6 +131,8 @@ impl PipeImplBase for Win32PipeImpl {
             PipeMode::InProcess => false,
         }
     }
+
+    const INVALID_FD: NativeFd = INVALID_HANDLE_VALUE;
 }
 
 pub mod handle_serialization {

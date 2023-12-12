@@ -126,12 +126,11 @@ impl Iterator for RawStream {
                     match buffer {
                         Ok(mut v) => {
                             if !self.leftover.is_empty() {
-                                while let Some(b) = self.leftover.pop() {
-                                    v.insert(0, b);
-                                }
+                                v.reserve(self.leftover.len());
+                                v.splice(0..0, self.leftover.drain(..));
                             }
 
-                            match String::from_utf8(v.clone()) {
+                            match std::str::from_utf8(&v) {
                                 Ok(s) => {
                                     // Great, we have a complete string, let's output it
                                     Some(Ok(Value::string(s, self.span)))
@@ -141,9 +140,7 @@ impl Iterator for RawStream {
                                     if v.is_empty() {
                                         // We can just end here
                                         None
-                                    } else if v.len() > 3
-                                        && (v.len() - err.utf8_error().valid_up_to() > 3)
-                                    {
+                                    } else if v.len() > 3 && (v.len() - err.valid_up_to() > 3) {
                                         // As UTF-8 characters are max 4 bytes, if we have more than that in error we know
                                         // that it's not just a character spanning two frames.
                                         // We now know we are definitely binary, so switch to binary and stay there.
@@ -153,10 +150,9 @@ impl Iterator for RawStream {
                                         // Okay, we have a tiny bit of error at the end of the buffer. This could very well be
                                         // a character that spans two frames. Since this is the case, remove the error from
                                         // the current frame an dput it in the leftover buffer.
-                                        self.leftover =
-                                            v[err.utf8_error().valid_up_to()..].to_vec();
+                                        self.leftover = v[err.valid_up_to()..].to_vec();
 
-                                        let buf = v[0..err.utf8_error().valid_up_to()].to_vec();
+                                        let buf = v[0..err.valid_up_to()].to_vec();
 
                                         match String::from_utf8(buf) {
                                             Ok(s) => Some(Ok(Value::string(s, self.span))),

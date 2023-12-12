@@ -2,10 +2,12 @@ mod evaluated_call;
 mod plugin_custom_value;
 mod plugin_data;
 
+use std::io::Read;
+
 pub use evaluated_call::EvaluatedCall;
 use nu_pipes::{
     unidirectional::{PipeRead, UnOpenedPipe},
-    PipeReaderCustomValue,
+    PipeReader,
 };
 use nu_protocol::{PluginSignature, ShellError, Span, Value};
 pub use plugin_custom_value::PluginCustomValue;
@@ -22,18 +24,12 @@ pub struct CallInfo {
 #[derive(Debug)]
 pub enum PluginPipelineData {
     Value(Value),
-    ExternalStream(UnOpenedPipe<PipeRead>),
+    ExternalStream(PipeReader, Option<Span>),
 }
 
 impl From<PluginPipelineData> for Value {
     fn from(input: PluginPipelineData) -> Self {
-        match input {
-            PluginPipelineData::Value(value) => value,
-            PluginPipelineData::ExternalStream(pipe) => Value::custom_value(
-                Box::new(PipeReaderCustomValue::new(pipe, Span::unknown())),
-                Span::unknown(),
-            ),
-        }
+        input.into_value()
     }
 }
 
@@ -41,10 +37,27 @@ impl PluginPipelineData {
     pub fn into_value(self) -> Value {
         match self {
             PluginPipelineData::Value(value) => value,
-            PluginPipelineData::ExternalStream(pipe) => Value::custom_value(
-                Box::new(PipeReaderCustomValue::new(pipe, Span::unknown())),
-                Span::unknown(),
-            ),
+            PluginPipelineData::ExternalStream(mut pipe, s) => {
+                let mut vec = Vec::new();
+                match pipe.read_to_end(&mut vec) {
+                    Ok(_) => {
+                        _ = pipe.close();
+                        match pipe.data_type() {
+                            nu_protocol::StreamDataType::Binary => {
+                                Value::binary(vec, s.unwrap_or(Span::unknown()))
+                            }
+                            nu_protocol::StreamDataType::Text => Value::string(
+                                String::from_utf8_lossy(&vec),
+                                s.unwrap_or(Span::unknown()),
+                            ),
+                        }
+                    }
+                    Err(e) => Value::error(
+                        ShellError::IOError(e.to_string()),
+                        s.unwrap_or(Span::unknown()),
+                    ),
+                }
+            }
         }
     }
 }

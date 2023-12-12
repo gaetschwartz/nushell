@@ -39,11 +39,9 @@ impl PluginDeclaration {
 
     fn make_call_input(
         &self,
-        input: PipelineData,
+        mut input: PipelineData,
         call: &Call,
     ) -> Result<(CallInput, OptPipeData), ShellError> {
-        let mut input = input;
-
         if self.signature.supports_pipelined_input {
             if let Some(stdout) = input.take_stream() {
                 match pipe(PipeOptions::default()) {
@@ -51,7 +49,11 @@ impl PluginDeclaration {
                         return Ok((CallInput::Pipe(pr), Some((pw, stdout))));
                     }
                     Err(e) => {
-                        trace!("Unable to create pipe for plugin {}: {}", self.name, e);
+                        trace!(
+                            "Unable to create pipe for plugin {}: {}, falling back to regular data",
+                            self.name,
+                            e
+                        );
                     }
                 }
             }

@@ -136,7 +136,6 @@ impl PipelineData {
     pub fn into_value(self, span: Span) -> Value {
         match self {
             PipelineData::Empty => Value::nothing(span),
-            PipelineData::Value(Value::Nothing { .. }, ..) => Value::nothing(span),
             PipelineData::Value(v, ..) => v.with_span(span),
             PipelineData::ListStream(s, ..) => Value::list(
                 s.collect(),
@@ -149,7 +148,7 @@ impl PipelineData {
             } => {
                 // Make sure everything has finished
                 if let Some(exit_code) = exit_code {
-                    let _: Vec<_> = exit_code.into_iter().collect();
+                    _ = exit_code.drain();
                 }
                 Value::nothing(span)
             }
@@ -159,12 +158,15 @@ impl PipelineData {
                 trim_end_newline,
                 ..
             } => {
-                let mut items = vec![];
+                let mut buf: Vec<u8> = vec![];
+                if let Some(known_size) = s.known_size {
+                    buf.reserve(known_size as usize);
+                }
 
-                for val in &mut s {
+                for val in &mut s.stream {
                     match val {
                         Ok(val) => {
-                            items.push(val);
+                            buf.extend(val);
                         }
                         Err(e) => {
                             return Value::error(e, span);
@@ -174,45 +176,23 @@ impl PipelineData {
 
                 // Make sure everything has finished
                 if let Some(exit_code) = exit_code {
-                    let _: Vec<_> = exit_code.into_iter().collect();
+                    _ = exit_code.drain()
                 }
 
                 // NOTE: currently trim-end-newline only handles for string output.
                 // For binary, user might need origin data.
                 match s.datatype {
                     StreamDataType::Binary => {
-                        let mut output = vec![];
-                        for item in items {
-                            match item.as_binary() {
-                                Ok(item) => {
-                                    output.extend(item);
-                                }
-                                Err(err) => {
-                                    return Value::error(err, span);
-                                }
-                            }
-                        }
-
-                        Value::binary(
-                            output, span, // FIXME?
-                        )
+                        // FIXME?
+                        Value::binary(buf, span)
                     }
                     StreamDataType::Text => {
-                        let mut output = String::new();
-                        for item in items {
-                            match item.as_string() {
-                                Ok(s) => output.push_str(&s),
-                                Err(err) => {
-                                    return Value::error(err, span);
-                                }
-                            }
-                        }
+                        let mut output = String::from_utf8_lossy(&buf).to_string();
                         if trim_end_newline {
                             output.truncate(output.trim_end_matches(LINE_ENDING_PATTERN).len())
                         }
-                        Value::string(
-                            output, span, // FIXME?
-                        )
+                        // FIXME?
+                        Value::string(output, span)
                     }
                 }
             }
