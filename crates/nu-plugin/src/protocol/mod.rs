@@ -53,7 +53,7 @@ impl PluginPipelineData {
                         }
                     }
                     Err(e) => Value::error(
-                        ShellError::IOError(e.to_string()),
+                        ShellError::IOError { msg: e.to_string() },
                         s.unwrap_or(Span::unknown()),
                     ),
                 }
@@ -153,10 +153,15 @@ impl From<ShellError> for LabeledError {
                 msg,
                 span: None,
             },
-            ShellError::IOError(err) => LabeledError {
+            ShellError::IOError { msg } => LabeledError {
                 label: "IO Error".into(),
-                msg: err.to_string(),
+                msg,
                 span: None,
+            },
+            ShellError::IOErrorSpanned { msg, span } => LabeledError {
+                label: "IO Error".into(),
+                msg,
+                span: span.into(),
             },
             err => LabeledError {
                 label: "Error - Add to LabeledError From<ShellError>".into(),

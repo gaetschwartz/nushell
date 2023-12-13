@@ -5,7 +5,7 @@ repository = "https://github.com/nushell/nushell/tree/main/crates/nu-pipes"
 edition = "2021"
 license = "MIT"
 name = "nu-pipes"
-version = "0.87.2"
+version = "0.88.0"
 
 [lib]
 bench = false
@@ -15,8 +15,8 @@ name = "pipe_echoer"
 path = "bin/pipe_echoer/main.rs"
 
 [dependencies]
-nu-engine = { path = "../nu-engine", version = "0.87.2" }
-nu-protocol = { path = "../nu-protocol", version = "0.87.2" }
+nu-engine = { path = "../nu-engine", version = "0.88.0" }
+nu-protocol = { path = "../nu-protocol", version = "0.88.0" }
 
 serde = "1.0"
 serde_json = "1.0"

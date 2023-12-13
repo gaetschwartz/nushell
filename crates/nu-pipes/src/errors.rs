@@ -37,7 +37,9 @@ impl From<PipeError> for std::io::Error {
 
 impl From<PipeError> for ShellError {
     fn from(error: PipeError) -> Self {
-        ShellError::IOError(error.to_string())
+        ShellError::IOError {
+            msg: error.to_string(),
+        }
     }
 }
 

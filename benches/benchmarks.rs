@@ -24,9 +24,11 @@ fn canonicalize_path(engine_state: &EngineState, path: &Path) -> PathBuf {
 }
 
 fn get_home_path(engine_state: &EngineState) -> PathBuf {
-    nu_path::home_dir()
-        .map(|path| canonicalize_path(engine_state, &path))
-        .unwrap_or_default()
+    if let Some(path) = nu_path::home_dir() {
+        canonicalize_path(engine_state, &path)
+    } else {
+        std::path::PathBuf::new()
+    }
 }
 
 // FIXME: All benchmarks live in this 1 file to speed up build times when benchmarking.

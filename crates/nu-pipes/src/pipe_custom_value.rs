@@ -32,13 +32,13 @@ impl PipeReaderCustomValue {
 
             return Ok(self.data.get_or_init(|| vec));
         } else {
-            return Err(ShellError::GenericError(
-                "Failed to read binary data from pipe".to_string(),
-                " ".to_string(),
-                None,
-                None,
-                vec![],
-            ));
+            return Err(ShellError::GenericError {
+                error: "Failed to read binary data from pipe".to_string(),
+                msg: " ".to_string(),
+                span: None,
+                help: None,
+                inner: vec![],
+            });
         }
     }
 }
@@ -67,13 +67,13 @@ impl CustomValue for PipeReaderCustomValue {
             )
         } else {
             Value::error(
-                ShellError::GenericError(
-                    "Failed to clone custom value".to_string(),
-                    " ".to_string(),
-                    None,
-                    None,
-                    vec![],
-                ),
+                ShellError::GenericError {
+                    error: "Failed to clone custom value".to_string(),
+                    msg: " ".to_string(),
+                    span: None,
+                    help: None,
+                    inner: vec![],
+                },
                 span,
             )
         }
