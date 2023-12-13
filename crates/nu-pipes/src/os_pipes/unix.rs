@@ -1,4 +1,9 @@
-use crate::{errors::PipeResult, trace_pipe, unidirectional::PipeMode, AsNativeFd};
+use crate::{
+    errors::PipeResult,
+    trace_pipe,
+    unidirectional::{PipeFdType, PipeMode, PipeRead, PipeWrite},
+    AsNativeFd, AsPipeFd,
+};
 
 use super::{IntoPipeFd, OsPipe, PipeError, PipeImplBase};
 
@@ -9,7 +14,7 @@ pub(crate) struct PipeImpl {}
 
 impl PipeImplBase for PipeImpl {
     fn create_pipe() -> Result<OsPipe, PipeError> {
-        let mut fds: [libc::c_int; 2] = [0; 2];
+        let mut fds = [0i32; 2];
         let result = unsafe { libc::pipe(fds.as_mut_ptr()) };
         if result < 0 {
             return Err(PipeError::os_error("failed to create pipe"));
@@ -21,28 +26,33 @@ impl PipeImplBase for PipeImpl {
         })
     }
 
-    fn close_pipe(fd: impl AsNativeFd) -> Result<(), PipeError> {
-        trace_pipe!("!!! closing {:?}", fd.as_native_fd());
-        let res = unsafe { libc::close(fd.as_native_fd()) };
+    fn close_pipe<T: PipeFdType>(fd: impl AsPipeFd<T>) -> Result<(), PipeError> {
+        trace_pipe!("!!! closing {:?}", fd.as_pipe_fd());
+        let res = unsafe { libc::close(fd.as_pipe_fd().as_native_fd()) };
 
         if res < 0 {
             return Err(PipeError::os_error(format!(
                 "failed to close handle {:?}",
-                fd.as_native_fd()
+                fd.as_pipe_fd()
             )));
         }
 
         Ok(())
     }
 
-    fn read(fd: impl AsNativeFd, buf: &mut [u8]) -> PipeResult<usize> {
-        trace_pipe!("{:?}", fd.as_native_fd());
-        let result =
-            unsafe { libc::read(fd.as_native_fd(), buf.as_mut_ptr() as *mut _, buf.len()) };
+    fn read(fd: impl AsPipeFd<PipeRead>, buf: &mut [u8]) -> PipeResult<usize> {
+        trace_pipe!("reading {:?} bytes from {:?}", buf.len(), fd.as_pipe_fd());
+        let result = unsafe {
+            libc::read(
+                fd.as_pipe_fd().as_native_fd(),
+                buf.as_mut_ptr() as *mut _,
+                buf.len(),
+            )
+        };
         if result < 0 {
             return Err(PipeError::os_error(format!(
                 "failed to read from handle {:?}",
-                fd.as_native_fd()
+                fd.as_pipe_fd()
             )));
         }
         trace_pipe!("read {} bytes", result);
@@ -50,14 +60,20 @@ impl PipeImplBase for PipeImpl {
         Ok(result as usize)
     }
 
-    fn write(fd: impl AsNativeFd, buf: &[u8]) -> PipeResult<usize> {
-        trace_pipe!("{:?}", fd.as_native_fd());
+    fn write(fd: impl AsPipeFd<PipeWrite>, buf: &[u8]) -> PipeResult<usize> {
+        trace_pipe!("writing {:?} bytes to {:?}", buf.len(), fd.as_pipe_fd());
 
-        let result = unsafe { libc::write(fd.as_native_fd(), buf.as_ptr() as *const _, buf.len()) };
+        let result = unsafe {
+            libc::write(
+                fd.as_pipe_fd().as_native_fd(),
+                buf.as_ptr() as *const _,
+                buf.len(),
+            )
+        };
         if result < 0 {
             return Err(PipeError::os_error(format!(
                 "failed to write to handle {:?}",
-                fd.as_native_fd()
+                fd.as_pipe_fd()
             )));
         }
 
@@ -73,5 +89,5 @@ impl PipeImplBase for PipeImpl {
         }
     }
 
-    const INVALID_FD: NativeFd = -1;
+    const INVALID_FD_VALUE: NativeFd = -1;
 }

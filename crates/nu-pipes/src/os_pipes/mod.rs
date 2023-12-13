@@ -21,15 +21,15 @@ mod pipe_impl;
 pub(crate) trait PipeImplBase {
     fn create_pipe() -> Result<OsPipe, PipeError>;
 
-    fn close_pipe(fd: impl AsNativeFd) -> PipeResult<()>;
+    fn read(fd: impl AsPipeFd<PipeRead>, buf: &mut [u8]) -> PipeResult<usize>;
 
-    fn read(fd: impl AsNativeFd, buf: &mut [u8]) -> PipeResult<usize>;
+    fn write(fd: impl AsPipeFd<PipeWrite>, buf: &[u8]) -> PipeResult<usize>;
 
-    fn write(fd: impl AsNativeFd, buf: &[u8]) -> PipeResult<usize>;
+    fn close_pipe<T: PipeFdType>(fd: impl AsPipeFd<T>) -> PipeResult<()>;
 
     fn should_close_other_for_mode(mode: PipeMode) -> bool;
 
-    const INVALID_FD: NativeFd;
+    const INVALID_FD_VALUE: NativeFd;
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -91,15 +91,44 @@ impl<T: PipeFdType> AsNativeFd for PipeFd<T> {
         self.0
     }
 }
-
-impl<T: PipeFdType> AsNativeFd for &PipeFd<T> {
-    fn as_native_fd(&self) -> NativeFd {
-        self.0
-    }
-}
 impl AsNativeFd for NativeFd {
     fn as_native_fd(&self) -> NativeFd {
         *self
+    }
+}
+impl<T: AsNativeFd> AsNativeFd for &T {
+    fn as_native_fd(&self) -> NativeFd {
+        (*self).as_native_fd()
+    }
+}
+
+pub trait AsPipeFd<T: PipeFdType> {
+    fn as_pipe_fd(&self) -> &PipeFd<T>;
+}
+impl<T: PipeFdType> AsPipeFd<T> for PipeFd<T> {
+    fn as_pipe_fd(&self) -> &PipeFd<T> {
+        self
+    }
+}
+impl AsPipeFd<PipeRead> for OsPipe {
+    fn as_pipe_fd(&self) -> &PipeFd<PipeRead> {
+        &self.read_fd
+    }
+}
+impl AsPipeFd<PipeWrite> for OsPipe {
+    fn as_pipe_fd(&self) -> &PipeFd<PipeWrite> {
+        &self.write_fd
+    }
+}
+
+impl<T: PipeFdType, F: AsPipeFd<T>> AsPipeFd<T> for &F {
+    fn as_pipe_fd(&self) -> &PipeFd<T> {
+        (*self).as_pipe_fd()
+    }
+}
+impl<T: PipeFdType> AsNativeFd for dyn AsPipeFd<T> {
+    fn as_native_fd(&self) -> NativeFd {
+        self.as_pipe_fd().as_native_fd()
     }
 }
 

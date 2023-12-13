@@ -44,7 +44,7 @@ impl<T: PipeFdType> Pipe<T> {
     pub fn invalid() -> Self {
         Self {
             datatype: StreamDataType::Binary,
-            fd: pipe_impl::PipeImpl::INVALID_FD.into_pipe_fd(),
+            fd: pipe_impl::PipeImpl::INVALID_FD_VALUE.into_pipe_fd(),
             mode: PipeMode::CrossProcess,
             marker: std::marker::PhantomData,
         }
