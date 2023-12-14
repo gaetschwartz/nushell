@@ -7,11 +7,11 @@ fn main() {
     let deserialized: UnOpenedPipe<PipeRead> = serde_json::from_str(&serialized).unwrap();
     let mut reader = deserialized.open().unwrap();
 
-    let mut buf = vec![];
-
+    let mut buf = vec![0u8; 256];
     loop {
-        let mut chunk = vec![0u8; 1024];
+        let mut chunk = [0u8; 256];
         let read = reader.read(&mut chunk).unwrap();
+        eprintln!("read {} bytes", read);
         if read == 0 {
             break;
         }

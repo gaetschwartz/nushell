@@ -164,23 +164,22 @@ fn test_pipe_in_another_process() {
 
     Command::new("cargo")
         .arg("build")
+        .arg("-q")
         .arg("--bin")
         .arg(BINARY_NAME)
-        .stderr(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
         .spawn()
         .unwrap()
         .wait()
         .unwrap();
 
     let (read, write) = pipe(PipeOptions::default()).unwrap();
-
     println!("read: {:?}", read);
     println!("write: {:?}", write);
 
     // serialize the pipe
     let serialized = serde_json::to_string(&read).unwrap();
     println!("{}", serialized);
+    println!("Running pipe_echoer...");
 
     // spawn a new process
     let mut res = Command::new("cargo")
@@ -188,22 +187,23 @@ fn test_pipe_in_another_process() {
         .arg("--bin")
         .arg(BINARY_NAME)
         .arg(serialized)
-        .stderr(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
 
-    println!("Running pipe_echoer...");
-    let mut writer = write.open().unwrap();
     // write hello world to the pipe
-    let written = writer.write("hello world".as_bytes()).unwrap();
+    let mut writer = write.open().unwrap();
+    let written = writer.write(b"hello world").unwrap();
     assert_eq!(written, 11);
     writer.close().unwrap();
 
+    println!("Waiting for pipe_echoer to finish...");
+
     let code = res.wait().unwrap();
+    read.close().unwrap();
 
     if !code.success() {
-        panic!("stderr: {}", as_string(res.stderr.take()));
+        panic!("Process failed: {:?}", code);
     }
 
     assert_eq!(as_string(res.stdout.take()), "hello world\n");

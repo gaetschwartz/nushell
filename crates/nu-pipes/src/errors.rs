@@ -1,20 +1,38 @@
 use nu_protocol::ShellError;
 
-#[derive(Debug)]
 pub struct PipeError {
     pub kind: OSErrorKind,
     pub message: String,
+    pub code: Option<i32>,
+}
+
+impl std::fmt::Debug for PipeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PipeError")
+            .field("kind", &self.kind)
+            .field("message", &self.message)
+            .field(
+                "code",
+                &self.code.map(|c| format!("{:#x}", c)).unwrap_or_default(),
+            )
+            .finish()
+    }
 }
 
 impl PipeError {
-    pub fn new(kind: OSErrorKind, message: String) -> Self {
-        Self { kind, message }
+    pub fn new(kind: OSErrorKind, message: String, code: Option<i32>) -> Self {
+        Self {
+            kind,
+            message,
+            code,
+        }
     }
 
-    pub fn os_error<S: Into<String>>(message: S) -> Self {
+    pub fn last_os_error<S: Into<String>>(message: S) -> Self {
         Self {
             kind: OSErrorKind::from_last_os_error(),
             message: message.into(),
+            code: std::io::Error::last_os_error().raw_os_error(),
         }
     }
 }
@@ -82,9 +100,9 @@ impl OSErrorKind {
 }
 
 #[cfg(windows)]
-impl From<windows::core::Error> for OSErrorKind {
-    fn from(error: windows::core::Error) -> Self {
-        let Some(error) = windows::Win32::Foundation::WIN32_ERROR::from_error(&error) else {
+impl From<&windows::core::Error> for OSErrorKind {
+    fn from(error: &windows::core::Error) -> Self {
+        let Some(error) = windows::Win32::Foundation::WIN32_ERROR::from_error(error) else {
             return OSErrorKind::None;
         };
         OSErrorKind::from(error)
@@ -96,7 +114,8 @@ impl From<windows::core::Error> for PipeError {
     fn from(error: windows::core::Error) -> Self {
         Self {
             message: error.message().to_string(),
-            kind: OSErrorKind::from(error),
+            code: error.code().0.into(),
+            kind: OSErrorKind::from(&error),
         }
     }
 }

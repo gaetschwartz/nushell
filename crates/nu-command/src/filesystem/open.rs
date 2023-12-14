@@ -1,5 +1,5 @@
 use nu_engine::{current_dir, eval_block, CallExt};
-use nu_pipes::io::PIPE_BUFFER_CAPACITY;
+use nu_pipes::PIPE_BUFFER_CAPACITY;
 use nu_protocol::ast::Call;
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::util::BufferedReader;

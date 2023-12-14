@@ -84,10 +84,16 @@ impl PipeImplBase for PipeImpl {
 
     fn should_close_other_for_mode(mode: PipeMode) -> bool {
         match mode {
-            PipeMode::InProcess => false,
             PipeMode::CrossProcess => true,
+            PipeMode::InProcess => false,
         }
     }
 
     const INVALID_FD_VALUE: NativeFd = -1;
+}
+
+impl AsNativeFd for i32 {
+    fn as_native_fd(&self) -> NativeFd {
+        *self
+    }
 }

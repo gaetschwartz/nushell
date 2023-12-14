@@ -2,9 +2,13 @@ use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use crate::errors::{PipeError, PipeResult};
+use crate::{
+    errors::{PipeError, PipeResult},
+    PipeReader,
+};
 
 use self::{
+    io::PipeWriter,
     pipe_impl::NativeFd,
     unidirectional::{PipeFdType, PipeFdTypeEnum, PipeMode, PipeRead, PipeWrite},
 };
@@ -17,6 +21,8 @@ pub mod unidirectional;
 #[cfg_attr(windows, path = "windows.rs")]
 #[cfg_attr(unix, path = "unix.rs")]
 mod pipe_impl;
+
+pub const PIPE_BUFFER_CAPACITY: usize = 1024 * 8;
 
 pub(crate) trait PipeImplBase {
     fn create_pipe() -> Result<OsPipe, PipeError>;
@@ -38,12 +44,9 @@ pub(crate) struct OsPipe {
     write_fd: PipeFd<PipeWrite>,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct PipeFd<T: PipeFdType + ?Sized>(
-    #[cfg_attr(windows, serde(with = "pipe_impl::handle_serialization"))] pub(crate) NativeFd,
-    PhantomData<T>,
-);
+pub struct PipeFd<T: PipeFdType + ?Sized>(pub(crate) NativeFd, pub(crate) PhantomData<T>);
 
 impl<T: PipeFdType> std::fmt::Debug for PipeFd<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -87,16 +90,19 @@ pub trait AsNativeFd {
 }
 
 impl<T: PipeFdType> AsNativeFd for PipeFd<T> {
+    #[inline]
     fn as_native_fd(&self) -> NativeFd {
         self.0
     }
 }
 impl AsNativeFd for NativeFd {
+    #[inline]
     fn as_native_fd(&self) -> NativeFd {
         *self
     }
 }
 impl<T: AsNativeFd> AsNativeFd for &T {
+    #[inline]
     fn as_native_fd(&self) -> NativeFd {
         (*self).as_native_fd()
     }
@@ -106,27 +112,44 @@ pub trait AsPipeFd<T: PipeFdType> {
     fn as_pipe_fd(&self) -> &PipeFd<T>;
 }
 impl<T: PipeFdType> AsPipeFd<T> for PipeFd<T> {
+    #[inline]
     fn as_pipe_fd(&self) -> &PipeFd<T> {
         self
     }
 }
+impl AsPipeFd<PipeRead> for PipeReader {
+    #[inline]
+    fn as_pipe_fd(&self) -> &PipeFd<PipeRead> {
+        &self.pipe.fd
+    }
+}
+impl AsPipeFd<PipeWrite> for PipeWriter {
+    #[inline]
+    fn as_pipe_fd(&self) -> &PipeFd<PipeWrite> {
+        &self.pipe.fd
+    }
+}
 impl AsPipeFd<PipeRead> for OsPipe {
+    #[inline]
     fn as_pipe_fd(&self) -> &PipeFd<PipeRead> {
         &self.read_fd
     }
 }
 impl AsPipeFd<PipeWrite> for OsPipe {
+    #[inline]
     fn as_pipe_fd(&self) -> &PipeFd<PipeWrite> {
         &self.write_fd
     }
 }
 
 impl<T: PipeFdType, F: AsPipeFd<T>> AsPipeFd<T> for &F {
+    #[inline]
     fn as_pipe_fd(&self) -> &PipeFd<T> {
         (*self).as_pipe_fd()
     }
 }
 impl<T: PipeFdType> AsNativeFd for dyn AsPipeFd<T> {
+    #[inline]
     fn as_native_fd(&self) -> NativeFd {
         self.as_pipe_fd().as_native_fd()
     }
@@ -149,5 +172,42 @@ impl<T: PipeFdType> std::fmt::Display for PipeFd<T> {
         #[cfg(unix)]
         let fd = self.0;
         write!(f, "{:?} ({})", T::NAME, fd)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+#[repr(transparent)]
+struct PipeFdSer(
+    #[cfg_attr(windows, serde(with = "pipe_impl::handle_serialization"))] pub(crate) NativeFd,
+);
+
+impl<T: PipeFdType> Serialize for PipeFd<T> {
+    fn serialize<S>(
+        &self,
+        serializer: S,
+    ) -> Result<<S as serde::Serializer>::Ok, <S as serde::Serializer>::Error>
+    where
+        S: serde::Serializer,
+    {
+        let tuple = (PipeFdSer(self.0), T::NAME);
+        tuple.serialize(serializer)
+    }
+}
+
+impl<'de, T: PipeFdType> Deserialize<'de> for PipeFd<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let (fd, name): (PipeFdSer, char) = Deserialize::deserialize(deserializer)?;
+        if name != T::NAME {
+            return Err(serde::de::Error::custom(format!(
+                "expected pipe type {}, got {}",
+                T::NAME,
+                name
+            )));
+        }
+        Ok(PipeFd(fd.0, PhantomData))
     }
 }

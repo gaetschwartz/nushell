@@ -355,7 +355,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                                 pipe.open()
                                     .map(|p| {
                                         PluginPipelineData::ExternalStream(
-                                            p,
+                                            p.reader(),
                                             call_info.call.head.into(),
                                         )
                                     })

@@ -2,14 +2,15 @@ use std::io::{BufReader, BufWriter, Write};
 
 use nu_protocol::StreamDataType;
 
-use crate::unidirectional::{Pipe, PipeRead, PipeWrite};
-
-pub const PIPE_BUFFER_CAPACITY: usize = 128 * 1024;
+use crate::{
+    unidirectional::{Pipe, PipeRead, PipeWrite},
+    PIPE_BUFFER_CAPACITY,
+};
 
 /// Represents an unbuffered handle writer. Prefer `BufferedHandleWriter` over this for better performance.
 pub struct PipeWriter {
     pub(crate) pipe: Pipe<PipeWrite>,
-    writer: Option<BufWriter<Pipe<PipeWrite>>>,
+    writer: BufWriter<Pipe<PipeWrite>>,
 }
 
 impl PipeWriter {
@@ -17,33 +18,12 @@ impl PipeWriter {
         let finishable_write = BufWriter::with_capacity(PIPE_BUFFER_CAPACITY, pipe.clone());
         Self {
             pipe,
-            writer: Some(finishable_write),
+            writer: finishable_write,
         }
-    }
-
-    pub fn set_pledged_src_size(&mut self, size: Option<u64>) -> Result<(), std::io::Error> {
-        self.writer.as_mut().map_or(
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "writer is already closed",
-            )),
-            |w| w.set_pledged_src_size(size),
-        )
     }
 
     pub fn close(&mut self) -> Result<(), std::io::Error> {
-        let writer = self.writer.take();
-        match writer {
-            Some(writer) => {
-                writer.finish()?;
-            }
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "failed to close handle: writer is already closed",
-                ))
-            }
-        }
+        self.flush()?;
 
         self.pipe.close().map_err(|e| {
             std::io::Error::new(
@@ -56,55 +36,11 @@ impl PipeWriter {
 
 impl std::io::Write for PipeWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.writer.as_mut().map_or(
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "writer is already closed",
-            )),
-            |w| w.write(buf),
-        )
+        self.writer.write(buf)
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.as_mut().map_or(
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "writer is already closed",
-            )),
-            |w| w.flush(),
-        )
+        self.writer.flush()
     }
-}
-
-trait FinishableWrite: std::io::Write {
-    type Inner: Sized;
-
-    fn finish(self) -> Result<(), std::io::Error>;
-
-    fn set_pledged_src_size(&mut self, _size: Option<u64>) -> Result<(), std::io::Error> {
-        Ok(())
-    }
-}
-
-impl FinishableWrite for Pipe<PipeWrite> {
-    type Inner = Pipe<PipeWrite>;
-
-    #[inline(always)]
-    fn finish(self) -> Result<(), std::io::Error> {
-        Ok(())
-    }
-}
-
-impl<W: FinishableWrite> FinishableWrite for BufWriter<W> {
-    fn finish(mut self) -> Result<(), std::io::Error> {
-        self.flush()?;
-        Box::new(self.into_inner()?).finish()
-    }
-
-    fn set_pledged_src_size(&mut self, size: Option<u64>) -> Result<(), std::io::Error> {
-        self.get_mut().set_pledged_src_size(size)
-    }
-
-    type Inner = W::Inner;
 }
 
 /// A struct representing a handle reader.
@@ -157,5 +93,3 @@ impl std::io::Read for PipeReader {
         self.reader.read(buf)
     }
 }
-
-unsafe impl Sync for PipeReader {}

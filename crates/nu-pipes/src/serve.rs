@@ -34,9 +34,7 @@ impl<'a> StreamSender<'a> for UnOpenedPipe<PipeWrite> {
             .spawn_scoped(scope, move || {
                 trace_pipe!("starting to write");
                 let mut writer = self.open().unwrap();
-                if let Some(size) = stdout.known_size {
-                    _ = writer.set_pledged_src_size(Some(size));
-                }
+
                 let mut stdout = stdout;
 
                 loop {
