@@ -49,7 +49,7 @@ impl PluginDeclaration {
                 match pipe() {
                     Ok((pr, pw)) => {
                         return Ok(CallInputWithOptPipe(
-                            CallInput::Pipe(pr, stream.datatype),
+                            CallInput::Pipe(pr.into_inheritable()?, stream.datatype),
                             Some((pw, stream)),
                         ));
                     }
@@ -159,13 +159,6 @@ impl Command for PluginDeclaration {
         plugin_cmd.envs(current_envs);
 
         let (call_input, pipe, stdout) = self.make_call_input(input, call)?.spread_pipe();
-        let pipe = if let Some(p) = pipe {
-            let dupe = p.try_clone()?;
-            p.close()?;
-            Some(dupe)
-        } else {
-            None
-        };
 
         let mut child = plugin_cmd.spawn().map_err(|err| {
             let decl = engine_state.get_decl(call.decl_id);

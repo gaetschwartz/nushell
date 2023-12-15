@@ -24,6 +24,12 @@ pub(crate) type PipeImpl = Win32PipeImpl;
 
 pub(crate) struct Win32PipeImpl();
 
+const DEFAULT_SECURITY_ATTRIBUTES: SECURITY_ATTRIBUTES = SECURITY_ATTRIBUTES {
+    nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+    lpSecurityDescriptor: std::ptr::null_mut(),
+    bInheritHandle: BOOL(0),
+};
+
 impl PipeImplBase for Win32PipeImpl {
     fn create_pipe() -> Result<OsPipe, PipeError> {
         trace_pipe!("Creating pipe");
@@ -35,11 +41,7 @@ impl PipeImplBase for Win32PipeImpl {
             CreatePipe(
                 &mut read_fd,
                 &mut write_fd,
-                Some(&SECURITY_ATTRIBUTES {
-                    nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-                    lpSecurityDescriptor: std::ptr::null_mut(),
-                    bInheritHandle: BOOL::from(true),
-                }),
+                Some(&DEFAULT_SECURITY_ATTRIBUTES),
                 0,
             )
         }?;
@@ -113,7 +115,7 @@ impl PipeImplBase for Win32PipeImpl {
                 current_process,
                 &mut new_fd,
                 0,
-                BOOL::from(false),
+                BOOL::from(true),
                 DUPLICATE_SAME_ACCESS,
             )
         }?;
@@ -134,5 +136,16 @@ pub(crate) struct FdSerializable(pub isize);
 impl AsNativeFd for i32 {
     fn as_native_fd(&self) -> NativeFd {
         windows::Win32::Foundation::HANDLE(*self as isize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::Foundation::BOOL;
+
+    #[test]
+    fn default_security_attributes() {
+        let sa = super::DEFAULT_SECURITY_ATTRIBUTES;
+        assert_eq!(sa.bInheritHandle, BOOL::from(false));
     }
 }

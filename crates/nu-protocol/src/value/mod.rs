@@ -327,6 +327,7 @@ impl Value {
             }),
             Value::Date { val, .. } => Ok(val.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
             Value::CustomValue { val, .. } => val.as_string(),
+            Value::Error { error, .. } => Err(*error.clone()),
             x => Err(ShellError::CantConvert {
                 to_type: "string".into(),
                 from_type: x.get_type().to_string(),

@@ -14,7 +14,6 @@ use self::{
 };
 pub use sys::OSError;
 
-// pub mod bidirectional;
 pub mod io;
 pub mod unidirectional;
 
@@ -47,6 +46,14 @@ pub(crate) struct OsPipe {
 #[derive(Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct PipeFd<T: PipeFdType>(pub(crate) NativeFd, pub(crate) PhantomData<T>);
+
+impl<T: PipeFdType> PipeFd<T> {
+    pub fn into_inheritable(self) -> Result<PipeFd<T>, PipeError> {
+        let dup = sys::PipeImpl::dup(&self)?;
+        self.close()?;
+        Ok(dup)
+    }
+}
 
 impl PipeFd<PipeRead> {
     pub fn into_reader(self) -> OwningPipeReader {
