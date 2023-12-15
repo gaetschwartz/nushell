@@ -8,11 +8,11 @@ use crate::{
 };
 
 use self::{
-    io::PipeWriter,
-    pipe_impl::NativeFd,
-    unidirectional::{PipeFdType, PipeFdTypeEnum, PipeMode, PipeRead, PipeWrite},
+    io::{CloseOwningError, OwningPipeReader, OwningPipeWriter, PipeWriter},
+    sys::NativeFd,
+    unidirectional::{PipeFdType, PipeFdTypeEnum, PipeRead, PipeWrite},
 };
-pub use pipe_impl::OSError;
+pub use sys::OSError;
 
 // pub mod bidirectional;
 pub mod io;
@@ -20,7 +20,7 @@ pub mod unidirectional;
 
 #[cfg_attr(windows, path = "windows.rs")]
 #[cfg_attr(unix, path = "unix.rs")]
-mod pipe_impl;
+mod sys;
 
 pub const PIPE_BUFFER_CAPACITY: usize = 1024 * 8;
 
@@ -33,7 +33,7 @@ pub(crate) trait PipeImplBase {
 
     fn close_pipe<T: PipeFdType>(fd: impl AsPipeFd<T>) -> PipeResult<()>;
 
-    fn should_close_other_for_mode(mode: PipeMode) -> bool;
+    fn dup<T: PipeFdType>(fd: impl AsPipeFd<T>) -> PipeResult<PipeFd<T>>;
 
     const INVALID_FD_VALUE: NativeFd;
 }
@@ -44,9 +44,33 @@ pub(crate) struct OsPipe {
     write_fd: PipeFd<PipeWrite>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct PipeFd<T: PipeFdType + ?Sized>(pub(crate) NativeFd, pub(crate) PhantomData<T>);
+pub struct PipeFd<T: PipeFdType>(pub(crate) NativeFd, pub(crate) PhantomData<T>);
+
+impl PipeFd<PipeRead> {
+    pub fn into_reader(self) -> OwningPipeReader {
+        OwningPipeReader::new(self)
+    }
+}
+
+impl PipeFd<PipeWrite> {
+    pub fn into_writer(self) -> OwningPipeWriter {
+        OwningPipeWriter::new(self)
+    }
+}
+
+impl<T: PipeFdType> PipeFd<T> {
+    pub fn try_clone(&self) -> Result<PipeFd<T>, PipeError> {
+        sys::PipeImpl::dup(self)
+    }
+}
+
+impl<T: PipeFdType> From<i32> for PipeFd<T> {
+    fn from(val: i32) -> Self {
+        PipeFd(val.as_native_fd(), PhantomData)
+    }
+}
 
 impl<T: PipeFdType> std::fmt::Debug for PipeFd<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -63,8 +87,11 @@ impl<T: PipeFdType> std::fmt::Debug for PipeFd<T> {
 }
 
 impl<T: PipeFdType> PipeFd<T> {
-    pub fn close(&self) -> Result<(), PipeError> {
-        pipe_impl::PipeImpl::close_pipe(self)
+    pub fn close(self) -> Result<(), CloseOwningError<PipeFd<T>, PipeError>> {
+        match sys::PipeImpl::close_pipe(&self) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(CloseOwningError::new(e, self)),
+        }
     }
 }
 
@@ -117,16 +144,16 @@ impl<T: PipeFdType> AsPipeFd<T> for PipeFd<T> {
         self
     }
 }
-impl AsPipeFd<PipeRead> for PipeReader {
+impl AsPipeFd<PipeRead> for PipeReader<'_> {
     #[inline]
     fn as_pipe_fd(&self) -> &PipeFd<PipeRead> {
-        &self.pipe.fd
+        self.fd
     }
 }
-impl AsPipeFd<PipeWrite> for PipeWriter {
+impl AsPipeFd<PipeWrite> for PipeWriter<'_> {
     #[inline]
     fn as_pipe_fd(&self) -> &PipeFd<PipeWrite> {
-        &self.pipe.fd
+        self.fd
     }
 }
 impl AsPipeFd<PipeRead> for OsPipe {
@@ -178,9 +205,7 @@ impl<T: PipeFdType> std::fmt::Display for PipeFd<T> {
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 #[repr(transparent)]
-struct PipeFdSer(
-    #[cfg_attr(windows, serde(with = "pipe_impl::handle_serialization"))] pub(crate) NativeFd,
-);
+struct PipeFdSer(#[serde(with = "sys::FdSerializable")] pub(crate) NativeFd);
 
 impl<T: PipeFdType> Serialize for PipeFd<T> {
     fn serialize<S>(
@@ -190,8 +215,7 @@ impl<T: PipeFdType> Serialize for PipeFd<T> {
     where
         S: serde::Serializer,
     {
-        let tuple = (PipeFdSer(self.0), T::NAME);
-        tuple.serialize(serializer)
+        (PipeFdSer(self.0), T::NAME).serialize(serializer)
     }
 }
 
@@ -200,7 +224,7 @@ impl<'de, T: PipeFdType> Deserialize<'de> for PipeFd<T> {
     where
         D: serde::Deserializer<'de>,
     {
-        let (fd, name): (PipeFdSer, char) = Deserialize::deserialize(deserializer)?;
+        let (fd, name) = <(PipeFdSer, char)>::deserialize(deserializer)?;
         if name != T::NAME {
             return Err(serde::de::Error::custom(format!(
                 "expected pipe type {}, got {}",

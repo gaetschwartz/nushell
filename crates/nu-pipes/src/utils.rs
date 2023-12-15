@@ -58,6 +58,28 @@ pub fn named_thread<T: 'static + Send, F: 'static + Send + FnOnce() -> T, S: Int
     std::thread::Builder::new().name(name.into()).spawn(f)
 }
 
+pub(crate) trait NamedScopedThreadSpawn<'scope, 'env: 'scope> {
+    fn spawn_named<'a, T: 'static + Send, F: 'static + Send + FnOnce() -> T>(
+        &'scope self,
+        name: &'a str,
+        f: F,
+    ) -> Result<std::thread::ScopedJoinHandle<'scope, T>, std::io::Error>;
+}
+
+impl<'scope, 'env: 'scope> NamedScopedThreadSpawn<'scope, 'env>
+    for std::thread::Scope<'scope, 'env>
+{
+    fn spawn_named<'a, T: 'static + Send, F: 'static + Send + FnOnce() -> T>(
+        &'scope self,
+        name: &'a str,
+        f: F,
+    ) -> Result<std::thread::ScopedJoinHandle<'scope, T>, std::io::Error> {
+        std::thread::Builder::new()
+            .name(name.to_owned())
+            .spawn_scoped(self, f)
+    }
+}
+
 pub fn catch_result<T, E: std::error::Error, F: FnOnce() -> Result<T, E>>(f: F) -> Result<T, E> {
     f()
 }

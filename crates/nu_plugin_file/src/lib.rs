@@ -20,7 +20,7 @@ impl Plugin for FileCmd {
         call: &EvaluatedCall,
         input: PluginPipelineData,
     ) -> Result<Value, LabeledError> {
-        let PluginPipelineData::ExternalStream(mut reader, _) = input else {
+        let PluginPipelineData::ExternalStream(mut reader, _, _) = input else {
             return Err(LabeledError {
                 label: "ERROR from plugin".into(),
                 msg: "expected external stream".into(),

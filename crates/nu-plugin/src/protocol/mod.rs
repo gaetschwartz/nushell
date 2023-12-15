@@ -5,11 +5,8 @@ mod plugin_data;
 use std::io::Read;
 
 pub use evaluated_call::EvaluatedCall;
-use nu_pipes::{
-    unidirectional::{PipeRead, UnOpenedPipe},
-    PipeReader,
-};
-use nu_protocol::{PluginSignature, ShellError, Span, Value};
+use nu_pipes::{io::OwningPipeReader, unidirectional::PipeRead, PipeFd};
+use nu_protocol::{PluginSignature, ShellError, Span, StreamDataType, Value};
 pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
 use serde::{Deserialize, Serialize};
@@ -24,7 +21,7 @@ pub struct CallInfo {
 #[derive(Debug)]
 pub enum PluginPipelineData {
     Value(Value),
-    ExternalStream(PipeReader, Option<Span>),
+    ExternalStream(OwningPipeReader, StreamDataType, Option<Span>),
 }
 
 impl From<PluginPipelineData> for Value {
@@ -37,12 +34,12 @@ impl PluginPipelineData {
     pub fn into_value(self) -> Value {
         match self {
             PluginPipelineData::Value(value) => value,
-            PluginPipelineData::ExternalStream(mut pipe, s) => {
+            PluginPipelineData::ExternalStream(mut pipe, dt, s) => {
                 let mut vec = Vec::new();
                 match pipe.read_to_end(&mut vec) {
                     Ok(_) => {
                         _ = pipe.close();
-                        match pipe.data_type() {
+                        match dt {
                             nu_protocol::StreamDataType::Binary => {
                                 Value::binary(vec, s.unwrap_or(Span::unknown()))
                             }
@@ -66,7 +63,7 @@ impl PluginPipelineData {
 pub enum CallInput {
     Value(Value),
     Data(PluginData),
-    Pipe(UnOpenedPipe<PipeRead>),
+    Pipe(PipeFd<PipeRead>, StreamDataType),
 }
 
 // Information sent to the plugin

@@ -4,13 +4,9 @@ use std::{
 };
 
 use nu_pipes::{
-    unidirectional::{pipe, PipeOptions, PipeRead, PipeWrite, UnOpenedPipe},
-    utils,
+    unidirectional::{pipe, PipeRead},
+    utils, PipeFd,
 };
-
-fn in_process() -> (UnOpenedPipe<PipeRead>, UnOpenedPipe<PipeWrite>) {
-    pipe(PipeOptions::IN_PROCESS).unwrap()
-}
 
 trait ReadAsString {
     fn read_as_string(&mut self) -> Result<String, std::io::Error>;
@@ -29,9 +25,9 @@ fn as_string(r: Option<impl Read>) -> String {
 }
 #[test]
 fn test_pipe() {
-    let (read, write) = in_process();
-    let mut reader = read.open().unwrap();
-    let mut writer = write.open().unwrap();
+    let (read, write) = pipe().unwrap();
+    let mut reader = read.into_reader();
+    let mut writer = write.into_writer();
     // write hello world to the pipe
     let written = writer.write("hello world".as_bytes()).unwrap();
     writer.close().unwrap();
@@ -49,8 +45,8 @@ fn test_pipe() {
 
 #[test]
 fn test_serialized_pipe() {
-    let (read, write) = in_process();
-    let mut writer = write.open().unwrap();
+    let (read, write) = pipe().unwrap();
+    let mut writer = write.into_writer();
     // write hello world to the pipe
     let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -62,8 +58,8 @@ fn test_serialized_pipe() {
     let serialized = serde_json::to_string(&read).unwrap();
     println!("{}", serialized);
     // deserialize the pipe
-    let deserialized: UnOpenedPipe<PipeRead> = serde_json::from_str(&serialized).unwrap();
-    let mut reader = deserialized.open().unwrap();
+    let deserialized: PipeFd<PipeRead> = serde_json::from_str(&serialized).unwrap();
+    let mut reader = deserialized.into_reader();
 
     let mut buf = [0u8; 11];
 
@@ -76,8 +72,8 @@ fn test_serialized_pipe() {
 
 #[test]
 fn pipe_in_another_thread() {
-    let (read, write) = in_process();
-    let mut writer = write.open().unwrap();
+    let (read, write) = pipe().unwrap();
+    let mut writer = write.into_writer();
     // write hello world to the pipe
     let written = writer.write("hello world".as_bytes()).unwrap();
 
@@ -89,8 +85,8 @@ fn pipe_in_another_thread() {
     // spawn a new process
     let (read, buf) = utils::named_thread("thread@pipe_in_another_thread", move || {
         // deserialize the pipe
-        let deserialized: UnOpenedPipe<PipeRead> = serde_json::from_str(&serialized).unwrap();
-        let mut reader = deserialized.open().unwrap();
+        let deserialized: PipeFd<PipeRead> = serde_json::from_str(&serialized).unwrap();
+        let mut reader = deserialized.into_reader();
 
         let mut buf = [0u8; 32];
 
@@ -119,11 +115,11 @@ impl<R: Read> ReadExact for R {}
 
 #[test]
 fn pipe_in_another_thread_cancelled() {
-    let (read, write) = in_process();
+    let (read, write) = pipe().unwrap();
 
     let thread: std::thread::JoinHandle<Result<(), std::io::Error>> =
         utils::named_thread("thread@pipe_in_another_thread_cancelled", move || {
-            let mut writer = write.open().unwrap();
+            let mut writer = write.into_writer();
 
             // serialize the pipe
             loop {
@@ -135,7 +131,7 @@ fn pipe_in_another_thread_cancelled() {
         })
         .unwrap();
 
-    let mut reader = read.open().unwrap();
+    let mut reader = read.into_reader();
     eprintln!("Starting to read from pipe...");
     let s1 = reader.read_exactly_n::<11>().unwrap();
     eprintln!("Read from pipe... (1)");
@@ -172,35 +168,42 @@ fn test_pipe_in_another_process() {
         .wait()
         .unwrap();
 
-    let (read, write) = pipe(PipeOptions::default()).unwrap();
+    let (read, write) = pipe().unwrap();
     println!("read: {:?}", read);
     println!("write: {:?}", write);
+    let write_dup = write.try_clone().unwrap();
+    write.close().unwrap();
 
     // serialize the pipe
-    let serialized = serde_json::to_string(&read).unwrap();
-    println!("{}", serialized);
+    let read_ser = serde_json::to_string(&read).unwrap();
+
+    println!("{}", read_ser);
     println!("Running pipe_echoer...");
 
     // spawn a new process
     let mut res = Command::new("cargo")
         .arg("run")
+        .arg("--quiet")
         .arg("--bin")
         .arg(BINARY_NAME)
-        .arg(serialized)
+        .arg(read_ser)
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
 
     // write hello world to the pipe
-    let mut writer = write.open().unwrap();
+    let mut writer = write_dup.into_writer();
     let written = writer.write(b"hello world").unwrap();
     assert_eq!(written, 11);
+    writer.flush().unwrap();
+    _ = writer.write(&[]).unwrap();
+    writer.flush().unwrap();
     writer.close().unwrap();
 
     println!("Waiting for pipe_echoer to finish...");
 
     let code = res.wait().unwrap();
-    read.close().unwrap();
+    // read_dup.close().unwrap();
 
     if !code.success() {
         panic!("Process failed: {:?}", code);

@@ -1,7 +1,6 @@
 mod declaration;
 pub use declaration::PluginDeclaration;
 use nu_engine::documentation::get_flags_section;
-use nu_pipes::unidirectional::{PipeRead, UnOpenedPipe};
 use nu_pipes::PipeReaderCustomValue;
 use std::collections::HashMap;
 
@@ -335,8 +334,6 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                         .map(|sig| sig.supports_pipelined_input)
                         .unwrap_or(false);
 
-                    let mut readpipe: Option<UnOpenedPipe<PipeRead>> = None;
-
                     let input = match call_info.input {
                         CallInput::Value(value) => Ok(PluginPipelineData::Value(value)),
                         CallInput::Data(plugin_data) => {
@@ -349,20 +346,20 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                                 })
                                 .map(PluginPipelineData::Value)
                         }
-                        CallInput::Pipe(pipe) => {
-                            readpipe = Some(pipe.clone());
+                        CallInput::Pipe(pipe, dt) => {
                             if supports_pipelined_input {
-                                pipe.open()
-                                    .map(|p| {
-                                        PluginPipelineData::ExternalStream(
-                                            p.reader(),
-                                            call_info.call.head.into(),
-                                        )
-                                    })
-                                    .map_err(Into::into)
+                                Ok(PluginPipelineData::ExternalStream(
+                                    pipe.into_reader(),
+                                    dt,
+                                    call_info.call.head.into(),
+                                ))
                             } else {
                                 Ok(PluginPipelineData::Value(Value::custom_value(
-                                    Box::new(PipeReaderCustomValue::new(pipe, call_info.call.head)),
+                                    Box::new(PipeReaderCustomValue::new(
+                                        pipe,
+                                        dt,
+                                        call_info.call.head,
+                                    )),
                                     call_info.call.head,
                                 )))
                             }
@@ -373,10 +370,6 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                         Ok(input) => plugin.run(&call_info.name, &call_info.call, input),
                         Err(err) => Err(err.into()),
                     };
-
-                    if let Some(pipe) = readpipe {
-                        _ = pipe.close();
-                    }
 
                     let response = match value {
                         Ok(value) => {

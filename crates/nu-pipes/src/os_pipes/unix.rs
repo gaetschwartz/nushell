@@ -97,3 +97,9 @@ impl AsNativeFd for i32 {
         *self
     }
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(remote = "i32")]
+#[repr(transparent)]
+#[serde(transparent)]
+pub(crate) struct FdSerializable(pub i32);

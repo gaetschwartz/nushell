@@ -2,7 +2,7 @@ use nu_protocol::{CustomValue, ShellError, Span, Spanned, StreamDataType, Value}
 use serde::{Deserialize, Serialize};
 use std::{io::Read, sync::OnceLock};
 
-use crate::unidirectional::{PipeRead, UnOpenedPipe};
+use crate::{unidirectional::PipeRead, PipeFd, PipeReader};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PipeReaderCustomValue {
@@ -10,15 +10,15 @@ pub struct PipeReaderCustomValue {
     #[serde(skip, default)]
     pub data: OnceLock<Vec<u8>>,
     #[serde(skip, default)]
-    pipe: OnceLock<UnOpenedPipe<PipeRead>>,
+    pipe: OnceLock<PipeFd<PipeRead>>,
     datatype: StreamDataType,
 }
 
 impl PipeReaderCustomValue {
-    pub fn new(os_pipe: UnOpenedPipe<PipeRead>, span: Span) -> Self {
+    pub fn new(os_pipe: PipeFd<PipeRead>, datatype: StreamDataType, span: Span) -> Self {
         Self {
             span,
-            datatype: os_pipe.datatype,
+            datatype,
             pipe: OnceLock::from(os_pipe),
             data: OnceLock::new(),
         }
@@ -43,8 +43,8 @@ impl PipeReaderCustomValue {
     }
 }
 
-fn read_pipe(pipe: &UnOpenedPipe<PipeRead>) -> Result<Vec<u8>, ShellError> {
-    let mut reader = pipe.open()?;
+fn read_pipe(pipe: &PipeFd<PipeRead>) -> Result<Vec<u8>, ShellError> {
+    let mut reader = PipeReader::new(pipe);
     let mut vec = Vec::new();
     _ = reader.read_to_end(&mut vec)?;
     Ok(vec)

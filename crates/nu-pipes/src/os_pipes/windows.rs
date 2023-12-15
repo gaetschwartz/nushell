@@ -1,21 +1,17 @@
-use std::ptr;
-
-// use log::trace;
-
-use windows::{
-    core::HRESULT,
-    Win32::{
-        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
-        Security::SECURITY_ATTRIBUTES,
-        Storage::FileSystem::{FlushFileBuffers, ReadFile, WriteFile},
-        System::Pipes::{CreatePipe, PeekNamedPipe},
+use serde::{Deserialize, Serialize};
+use windows::Win32::{
+    Foundation::{
+        CloseHandle, DuplicateHandle, BOOL, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE,
+        INVALID_HANDLE_VALUE,
     },
+    Security::SECURITY_ATTRIBUTES,
+    Storage::FileSystem::{ReadFile, WriteFile},
+    System::{Pipes::CreatePipe, Threading::GetCurrentProcess},
 };
 
 use crate::{
-    errors::OSErrorKind,
     trace_pipe,
-    unidirectional::{PipeFdType, PipeFdTypeEnum, PipeMode, PipeRead, PipeWrite},
+    unidirectional::{PipeFdType, PipeRead, PipeWrite},
     AsNativeFd, AsPipeFd, OsPipe, PipeResult,
 };
 
@@ -24,21 +20,9 @@ use super::{IntoPipeFd, PipeError, PipeImplBase};
 pub type NativeFd = windows::Win32::Foundation::HANDLE;
 pub type OSError = windows::core::Error;
 
-#[derive(Debug)]
-#[repr(transparent)]
-struct WindowsErrorCode(i32);
-
-impl PartialEq<WindowsErrorCode> for HRESULT {
-    fn eq(&self, other: &WindowsErrorCode) -> bool {
-        self.0 as u16 == other.0 as u16
-    }
-}
-
-const ERROR_BROKEN_PIPE: WindowsErrorCode = WindowsErrorCode(0x0000_006D);
-
 pub(crate) type PipeImpl = Win32PipeImpl;
 
-pub(crate) struct Win32PipeImpl {}
+pub(crate) struct Win32PipeImpl();
 
 impl PipeImplBase for Win32PipeImpl {
     fn create_pipe() -> Result<OsPipe, PipeError> {
@@ -53,8 +37,8 @@ impl PipeImplBase for Win32PipeImpl {
                 &mut write_fd,
                 Some(&SECURITY_ATTRIBUTES {
                     nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-                    lpSecurityDescriptor: ptr::null_mut(),
-                    bInheritHandle: true.into(),
+                    lpSecurityDescriptor: std::ptr::null_mut(),
+                    bInheritHandle: BOOL::from(true),
                 }),
                 0,
             )
@@ -66,17 +50,6 @@ impl PipeImplBase for Win32PipeImpl {
     }
 
     fn close_pipe<T: PipeFdType>(handle: impl AsPipeFd<T>) -> PipeResult<()> {
-        if T::TYPE == PipeFdTypeEnum::Write {
-            // FLUSH FIRST
-            trace_pipe!("Flushing {:?}", handle.as_pipe_fd());
-            match unsafe { FlushFileBuffers(handle.as_pipe_fd().as_native_fd()) } {
-                Ok(_) => {}
-                Err(e) => {
-                    trace_pipe!("Flush failed with {:?}", e);
-                }
-            }
-        }
-
         // CLOSE
         trace_pipe!("Closing {:?}", handle.as_pipe_fd());
         unsafe { CloseHandle(handle.as_pipe_fd().as_native_fd()) }?;
@@ -87,53 +60,28 @@ impl PipeImplBase for Win32PipeImpl {
         trace_pipe!("Reading {} from {:?}", buf.len(), handle.as_pipe_fd());
 
         let mut bytes_read = 0;
-        let mut bytes_available = 0;
-        let mut bytes_available_this_message = 0;
-        unsafe {
-            PeekNamedPipe(
-                handle.as_pipe_fd().as_native_fd(),
-                Some(buf.as_mut_ptr() as _),
-                buf.len() as u32,
-                Some(&mut bytes_read),
-                Some(&mut bytes_available),
-                Some(&mut bytes_available_this_message),
-            )
-        }?;
-
-        trace_pipe!(
-            "Read: {:?}, bytes_available: {}, bytes_available_this_message: {}",
-            bytes_read,
-            bytes_available,
-            bytes_available_this_message
-        );
-
-        if bytes_available == 0 {
-            return Ok(0);
-        }
-
-        // read the bytes
-        let mut bytes_read_2 = 0;
-        let to_read = std::cmp::min(bytes_available as usize, buf.len());
-        // null sink the rest
-        let mut sink = vec![0u8; to_read];
         let res = unsafe {
             ReadFile(
                 handle.as_pipe_fd().as_native_fd(),
-                Some(&mut sink),
-                Some(&mut bytes_read_2),
+                Some(buf),
+                Some(&mut bytes_read),
                 None,
             )
         };
-        assert_eq!(bytes_read, bytes_read_2);
 
         match res {
-            Ok(_) if bytes_read == 0 => Err(PipeError {
-                kind: OSErrorKind::BrokenPipe,
-                message: "Pipe is closed".to_string(),
-                code: Some(ERROR_BROKEN_PIPE.0),
-            }),
-            Ok(_) => Ok(bytes_read as usize),
-            Err(e) => Err(e.into()),
+            Ok(_) => {
+                trace_pipe!("Read {} bytes", bytes_read);
+                Ok(bytes_read as usize)
+            }
+            Err(e) if e.code() == ERROR_BROKEN_PIPE.to_hresult() => {
+                trace_pipe!("Broken pipe, meaning EOF");
+                Ok(0)
+            }
+            Err(e) => {
+                trace_pipe!("Read error: {:?}", e);
+                Err(e.into())
+            }
         }
     }
 
@@ -155,39 +103,33 @@ impl PipeImplBase for Win32PipeImpl {
         Ok(bytes_written as usize)
     }
 
-    fn should_close_other_for_mode(_mode: PipeMode) -> bool {
-        match _mode {
-            PipeMode::CrossProcess => false,
-            PipeMode::InProcess => false,
-        }
+    fn dup<T: PipeFdType>(fd: impl AsPipeFd<T>) -> PipeResult<crate::PipeFd<T>> {
+        let mut new_fd = INVALID_HANDLE_VALUE;
+        unsafe {
+            let current_process = GetCurrentProcess();
+            DuplicateHandle(
+                current_process,
+                fd.as_pipe_fd().as_native_fd(),
+                current_process,
+                &mut new_fd,
+                0,
+                BOOL::from(false),
+                DUPLICATE_SAME_ACCESS,
+            )
+        }?;
+        let dup_fd = new_fd.into_pipe_fd();
+        trace_pipe!("Duplicated {:?} to {:?}", fd.as_pipe_fd(), dup_fd);
+
+        Ok(dup_fd)
     }
 
     const INVALID_FD_VALUE: NativeFd = INVALID_HANDLE_VALUE;
 }
 
-pub mod handle_serialization {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<windows::Win32::Foundation::HANDLE, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let handle = <isize>::deserialize(deserializer)?;
-        Ok(windows::Win32::Foundation::HANDLE(handle))
-    }
-
-    pub fn serialize<S>(
-        handle: &windows::Win32::Foundation::HANDLE,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        handle.0.serialize(serializer)
-    }
-}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(remote = "windows::Win32::Foundation::HANDLE")]
+pub(crate) struct FdSerializable(pub isize);
 
 impl AsNativeFd for i32 {
     fn as_native_fd(&self) -> NativeFd {

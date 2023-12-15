@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use log::trace;
-use nu_pipes::unidirectional::{pipe, PipeOptions, PipeWrite, UnOpenedPipe};
-use nu_pipes::StreamSender;
+use nu_pipes::unidirectional::{pipe, PipeWrite};
+use nu_pipes::{PipeFd, StreamSender};
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::{ast::Call, PluginSignature, Signature};
 use nu_protocol::{Example, PipelineData, RawStream, ShellError, Value};
@@ -46,10 +46,10 @@ impl PluginDeclaration {
             } = input
             {
                 let stream = stdout.take().unwrap();
-                match pipe(PipeOptions::default()) {
+                match pipe() {
                     Ok((pr, pw)) => {
                         return Ok(CallInputWithOptPipe(
-                            CallInput::Pipe(pr),
+                            CallInput::Pipe(pr, stream.datatype),
                             Some((pw, stream)),
                         ));
                     }
@@ -159,6 +159,13 @@ impl Command for PluginDeclaration {
         plugin_cmd.envs(current_envs);
 
         let (call_input, pipe, stdout) = self.make_call_input(input, call)?.spread_pipe();
+        let pipe = if let Some(p) = pipe {
+            let dupe = p.try_clone()?;
+            p.close()?;
+            Some(dupe)
+        } else {
+            None
+        };
 
         let mut child = plugin_cmd.spawn().map_err(|err| {
             let decl = engine_state.get_decl(call.decl_id);
@@ -172,7 +179,7 @@ impl Command for PluginDeclaration {
         })?;
 
         thread::scope(|s| {
-            let join_handle = if let (Some(pipe), Some(stdout)) = (&pipe, stdout) {
+            let join_handle = if let (Some(pipe), Some(stdout)) = (pipe, stdout) {
                 pipe.send_stream_scoped(s, stdout)?
             } else {
                 None
@@ -258,15 +265,9 @@ impl Command for PluginDeclaration {
     }
 }
 
-struct CallInputWithOptPipe(CallInput, Option<(UnOpenedPipe<PipeWrite>, RawStream)>);
+struct CallInputWithOptPipe(CallInput, Option<(PipeFd<PipeWrite>, RawStream)>);
 impl CallInputWithOptPipe {
-    fn spread_pipe(
-        self,
-    ) -> (
-        CallInput,
-        Option<UnOpenedPipe<PipeWrite>>,
-        Option<RawStream>,
-    ) {
+    fn spread_pipe(self) -> (CallInput, Option<PipeFd<PipeWrite>>, Option<RawStream>) {
         if let Some((pipe, stdout)) = self.1 {
             (self.0, Some(pipe), Some(stdout))
         } else {

@@ -1,39 +1,40 @@
 use std::io::Write;
-use std::thread::Scope;
-use std::thread::ScopedJoinHandle;
+use std::thread;
 
 use nu_protocol::{RawStream, ShellError};
 
 use crate::trace_pipe;
-use crate::unidirectional::{PipeWrite, UnOpenedPipe};
+use crate::unidirectional::PipeWrite;
+use crate::utils::NamedScopedThreadSpawn;
+use crate::PipeFd;
 
 pub trait StreamSender<'a> {
     fn send_stream_scoped<'scope, 'env: 'scope>(
-        &'a self,
-        scope: &'scope Scope<'scope, 'env>,
+        self,
+        scope: &'scope thread::Scope<'scope, 'env>,
         stdout: RawStream,
-    ) -> Result<Option<ScopedJoinHandle<'scope, ()>>, ShellError>
+    ) -> Result<Option<thread::ScopedJoinHandle<'scope, ()>>, ShellError>
     where
         'a: 'env;
 }
 
-impl<'a> StreamSender<'a> for UnOpenedPipe<PipeWrite> {
+impl<'a> StreamSender<'a> for PipeFd<PipeWrite> {
     /// Starts a new thread that will pipe the stdout stream to the os pipe.
     ///
     /// Returns a handle to the thread if the input is a pipe and the output is an external stream.
     fn send_stream_scoped<'scope, 'env: 'scope>(
-        &'a self,
-        scope: &'scope Scope<'scope, 'env>,
+        self,
+        scope: &'scope thread::Scope<'scope, 'env>,
         stdout: RawStream,
-    ) -> Result<Option<ScopedJoinHandle<'scope, ()>>, ShellError>
+    ) -> Result<Option<thread::ScopedJoinHandle<'scope, ()>>, ShellError>
     where
         'a: 'env,
     {
-        let handle = std::thread::Builder::new()
-            .name("serve_stream".to_owned())
-            .spawn_scoped(scope, move || {
+        let handle = scope
+            .spawn_named("serve_stream", move || {
                 trace_pipe!("starting to write");
-                let mut writer = self.open().unwrap();
+
+                let mut writer = self.into_writer();
 
                 let mut stdout = stdout;
 
