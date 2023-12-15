@@ -113,30 +113,3 @@ macro_rules! libc_call {
         $var
     }};
 }
-
-#[macro_export]
-macro_rules! libc_call_res {
-    // take an optional string to add to the error
-    ($call:expr, $ctx:expr) => {{
-        let res = unsafe { $call };
-        if res < 0 {
-            Err($crate::errors::PipeError::last_os_error(format!(
-                "Failed to call {} while {}",
-                stringify!($call)
-            )))
-        } else {
-            Ok(res)
-        }
-    }};
-    ($call:expr) => {{
-        let res = unsafe { $call };
-        if res < 0 {
-            Err($crate::errors::PipeError::last_os_error(format!(
-                "Failed to call {}",
-                stringify!($call)
-            )))
-        } else {
-            Ok(res)
-        }
-    }};
-}

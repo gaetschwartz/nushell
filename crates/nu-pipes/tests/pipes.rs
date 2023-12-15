@@ -171,13 +171,12 @@ fn test_pipe_in_another_process() {
     let (read, write) = pipe().unwrap();
     println!("read: {:?}", read);
     println!("write: {:?}", write);
-    let write_dup = write.try_clone().unwrap();
-    write.close().unwrap();
+    let read_dup = read.try_clone().unwrap();
 
     // serialize the pipe
-    let read_ser = serde_json::to_string(&read).unwrap();
+    let json = serde_json::to_string(&read_dup).unwrap();
+    read.close().unwrap();
 
-    println!("{}", read_ser);
     println!("Running pipe_echoer...");
 
     // spawn a new process
@@ -186,17 +185,15 @@ fn test_pipe_in_another_process() {
         .arg("--quiet")
         .arg("--bin")
         .arg(BINARY_NAME)
-        .arg(read_ser)
+        .arg(json)
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
 
     // write hello world to the pipe
-    let mut writer = write_dup.into_writer();
+    let mut writer = write.into_writer();
     let written = writer.write(b"hello world").unwrap();
     assert_eq!(written, 11);
-    writer.flush().unwrap();
-    _ = writer.write(&[]).unwrap();
     writer.flush().unwrap();
     writer.close().unwrap();
 

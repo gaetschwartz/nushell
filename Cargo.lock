@@ -3029,6 +3029,7 @@ dependencies = [
 name = "nu-pipes"
 version = "0.88.0"
 dependencies = [
+ "cfg-if",
  "konst",
  "libc",
  "log",
