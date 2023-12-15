@@ -205,7 +205,7 @@ impl<T: PipeFdType> std::fmt::Display for PipeFd<T> {
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 #[repr(transparent)]
-struct PipeFdSer(#[serde(with = "sys::FdSerializable")] pub(crate) NativeFd);
+struct PipeFdSer(#[cfg_attr(windows, serde(with = "sys::FdSerializable"))] pub(crate) NativeFd);
 
 impl<T: PipeFdType> Serialize for PipeFd<T> {
     fn serialize<S>(

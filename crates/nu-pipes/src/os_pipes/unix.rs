@@ -1,8 +1,8 @@
 use crate::{
     errors::PipeResult,
     trace_pipe,
-    unidirectional::{PipeFdType, PipeMode, PipeRead, PipeWrite},
-    AsNativeFd, AsPipeFd,
+    unidirectional::{PipeFdType, PipeRead, PipeWrite},
+    AsNativeFd, AsPipeFd, PipeFd,
 };
 
 use super::{IntoPipeFd, OsPipe, PipeError, PipeImplBase};
@@ -17,7 +17,7 @@ impl PipeImplBase for PipeImpl {
         let mut fds = [0i32; 2];
         let result = unsafe { libc::pipe(fds.as_mut_ptr()) };
         if result < 0 {
-            return Err(PipeError::os_error("failed to create pipe"));
+            return Err(PipeError::last_os_error("failed to create pipe"));
         }
 
         Ok(OsPipe {
@@ -31,7 +31,7 @@ impl PipeImplBase for PipeImpl {
         let res = unsafe { libc::close(fd.as_pipe_fd().as_native_fd()) };
 
         if res < 0 {
-            return Err(PipeError::os_error(format!(
+            return Err(PipeError::last_os_error(format!(
                 "failed to close handle {:?}",
                 fd.as_pipe_fd()
             )));
@@ -50,7 +50,7 @@ impl PipeImplBase for PipeImpl {
             )
         };
         if result < 0 {
-            return Err(PipeError::os_error(format!(
+            return Err(PipeError::last_os_error(format!(
                 "failed to read from handle {:?}",
                 fd.as_pipe_fd()
             )));
@@ -71,7 +71,7 @@ impl PipeImplBase for PipeImpl {
             )
         };
         if result < 0 {
-            return Err(PipeError::os_error(format!(
+            return Err(PipeError::last_os_error(format!(
                 "failed to write to handle {:?}",
                 fd.as_pipe_fd()
             )));
@@ -82,24 +82,19 @@ impl PipeImplBase for PipeImpl {
         Ok(result as usize)
     }
 
-    fn should_close_other_for_mode(mode: PipeMode) -> bool {
-        match mode {
-            PipeMode::CrossProcess => true,
-            PipeMode::InProcess => false,
+    fn dup<T: PipeFdType>(fd: impl AsPipeFd<T>) -> Result<PipeFd<T>, PipeError> {
+        let result = unsafe { libc::dup(fd.as_pipe_fd().as_native_fd()) };
+        if result < 0 {
+            return Err(PipeError::last_os_error(format!(
+                "failed to duplicate handle {:?}",
+                fd.as_pipe_fd()
+            )));
         }
+
+        let dup_fd = result.into_pipe_fd();
+        trace_pipe!("duplicated {:?} to {:?}", fd.as_pipe_fd(), dup_fd);
+        Ok(dup_fd)
     }
 
     const INVALID_FD_VALUE: NativeFd = -1;
 }
-
-impl AsNativeFd for i32 {
-    fn as_native_fd(&self) -> NativeFd {
-        *self
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(remote = "i32")]
-#[repr(transparent)]
-#[serde(transparent)]
-pub(crate) struct FdSerializable(pub i32);
