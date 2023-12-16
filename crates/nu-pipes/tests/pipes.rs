@@ -24,7 +24,7 @@ fn as_string(r: Option<impl Read>) -> String {
         .unwrap_or("None".to_string())
 }
 #[test]
-fn test_pipe() {
+fn pipes_readwrite() {
     let (read, write) = pipe().unwrap();
     let mut reader = read.into_reader();
     let mut writer = write.into_writer();
@@ -44,34 +44,37 @@ fn test_pipe() {
 }
 
 #[test]
-fn test_serialized_pipe() {
+fn pipes_with_closed_read_end_cant_write() {
     let (read, write) = pipe().unwrap();
+    let mut reader = read.into_reader();
     let mut writer = write.into_writer();
     // write hello world to the pipe
     let written = writer.write("hello world".as_bytes()).unwrap();
+    writer.flush().unwrap();
 
     assert_eq!(written, 11);
 
-    writer.close().unwrap();
-
-    // serialize the pipe
-    let serialized = serde_json::to_string(&read).unwrap();
-    println!("{}", serialized);
-    // deserialize the pipe
-    let deserialized: PipeFd<PipeRead> = serde_json::from_str(&serialized).unwrap();
-    let mut reader = deserialized.into_reader();
-
     let mut buf = [0u8; 11];
+    reader.read(&mut buf).unwrap();
+    assert_eq!(&buf[..], "hello world".as_bytes());
 
-    let read = reader.read(&mut buf).unwrap();
-
-    assert_eq!(read, 11);
-    assert_eq!(buf, "hello world".as_bytes());
     reader.close().unwrap();
+
+    let written = writer.write("hello world".as_bytes());
+    let flushed = writer.flush();
+
+    assert!(
+        written.is_err() || flushed.is_err(),
+        "Expected error, but {}",
+        written
+            .map(|b| format!("wrote {} bytes", b))
+            .or_else(|_| flushed.map(|_| "flushed".to_string()))
+            .unwrap()
+    );
 }
 
 #[test]
-fn pipe_in_another_thread() {
+fn pipe_read_write_in_thread() {
     let (read, write) = pipe().unwrap();
     let mut writer = write.into_writer();
     // write hello world to the pipe
