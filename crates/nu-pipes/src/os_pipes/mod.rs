@@ -54,7 +54,7 @@ impl<T: PipeFdType> PipeFd<T> {
     /// This function is unsafe because it cannot guarantee that the given file descriptor
     /// is a valid pipe file descriptor ( it could be closed already, for example)
     pub unsafe fn from_raw_fd(fd: i32) -> Self {
-        Self(NativeFd::from(fd), PhantomData)
+        Self(NativeFd::from(fd.native_fd()), PhantomData)
     }
 
     pub fn into_inheritable(self) -> Result<PipeFd<T>, PipeError> {
@@ -113,12 +113,6 @@ impl<T: PipeFdType> From<PipeFd<T>> for NativeFd {
 
 trait IntoPipeFd<T: PipeFdType>: AsNativeFd {
     unsafe fn into_pipe_fd(self) -> PipeFd<T>;
-}
-
-impl<T: PipeFdType> IntoPipeFd<T> for NativeFd {
-    unsafe fn into_pipe_fd(self) -> PipeFd<T> {
-        PipeFd::from_raw_fd(self)
-    }
 }
 
 pub trait AsNativeFd {

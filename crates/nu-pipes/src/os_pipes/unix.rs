@@ -85,6 +85,12 @@ impl PipeImplBase for PipeImpl {
     const INVALID_FD_VALUE: NativeFd = -1;
 }
 
+impl<T: PipeFdType> IntoPipeFd<T> for NativeFd {
+    unsafe fn into_pipe_fd(self) -> PipeFd<T> {
+        PipeFd::from_raw_fd(self)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{unidirectional::pipe, AsNativeFd, AsPipeFd};

@@ -84,6 +84,7 @@ pub fn catch_result<T, E: std::error::Error, F: FnOnce() -> Result<T, E>>(f: F) 
     f()
 }
 
+#[allow(dead_code)]
 pub(crate) const LIBC_CALL_ERROR: &str = "Failed to call ";
 #[macro_export(local_inner_macros)]
 macro_rules! libc_call_error {

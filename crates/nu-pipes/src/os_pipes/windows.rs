@@ -12,7 +12,7 @@ use windows::Win32::{
 use crate::{
     trace_pipe,
     unidirectional::{PipeFdType, PipeRead, PipeWrite},
-    AsNativeFd, AsPipeFd, OsPipe, PipeResult,
+    AsNativeFd, AsPipeFd, OsPipe, PipeFd, PipeResult,
 };
 
 use super::{IntoPipeFd, PipeError, PipeImplBase};
@@ -46,15 +46,15 @@ impl PipeImplBase for Win32PipeImpl {
             )
         }?;
         Ok(OsPipe {
-            read_fd: read_fd.into_pipe_fd(),
-            write_fd: write_fd.into_pipe_fd(),
+            read_fd: unsafe { read_fd.into_pipe_fd() },
+            write_fd: unsafe { write_fd.into_pipe_fd() },
         })
     }
 
     fn close_pipe<T: PipeFdType>(handle: impl AsPipeFd<T>) -> PipeResult<()> {
         // CLOSE
         trace_pipe!("Closing {:?}", handle.as_pipe_fd());
-        unsafe { CloseHandle(handle.as_pipe_fd().as_native_fd()) }?;
+        unsafe { CloseHandle(handle.as_pipe_fd().native_fd()) }?;
         Ok(())
     }
 
@@ -64,7 +64,7 @@ impl PipeImplBase for Win32PipeImpl {
         let mut bytes_read = 0;
         let res = unsafe {
             ReadFile(
-                handle.as_pipe_fd().as_native_fd(),
+                handle.as_pipe_fd().native_fd(),
                 Some(buf),
                 Some(&mut bytes_read),
                 None,
@@ -93,7 +93,7 @@ impl PipeImplBase for Win32PipeImpl {
         let mut bytes_written = 0;
         unsafe {
             WriteFile(
-                handle.as_pipe_fd().as_native_fd(),
+                handle.as_pipe_fd().native_fd(),
                 Some(buf),
                 Some(&mut bytes_written),
                 None,
@@ -111,7 +111,7 @@ impl PipeImplBase for Win32PipeImpl {
             let current_process = GetCurrentProcess();
             DuplicateHandle(
                 current_process,
-                fd.as_pipe_fd().as_native_fd(),
+                fd.as_pipe_fd().native_fd(),
                 current_process,
                 &mut new_fd,
                 0,
@@ -119,7 +119,7 @@ impl PipeImplBase for Win32PipeImpl {
                 DUPLICATE_SAME_ACCESS,
             )
         }?;
-        let dup_fd = new_fd.into_pipe_fd();
+        let dup_fd = unsafe { new_fd.into_pipe_fd() };
         trace_pipe!("Duplicated {:?} to {:?}", fd.as_pipe_fd(), dup_fd);
 
         Ok(dup_fd)
@@ -136,6 +136,12 @@ pub(crate) struct FdSerializable(pub isize);
 impl AsNativeFd for i32 {
     unsafe fn native_fd(&self) -> NativeFd {
         windows::Win32::Foundation::HANDLE(*self as isize)
+    }
+}
+
+impl<T: PipeFdType> IntoPipeFd<T> for NativeFd {
+    unsafe fn into_pipe_fd(self) -> PipeFd<T> {
+        PipeFd::from_raw_fd(self.0 as i32)
     }
 }
 
