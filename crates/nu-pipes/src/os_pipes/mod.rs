@@ -37,13 +37,13 @@ pub(crate) trait PipeImplBase {
     const INVALID_FD_VALUE: NativeFd;
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub(crate) struct OsPipe {
     read_fd: PipeFd<PipeRead>,
     write_fd: PipeFd<PipeWrite>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 #[repr(transparent)]
 pub struct PipeFd<T: PipeFdType>(pub(crate) NativeFd, pub(crate) PhantomData<T>);
 

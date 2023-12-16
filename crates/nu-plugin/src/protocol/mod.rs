@@ -11,7 +11,7 @@ pub use plugin_custom_value::PluginCustomValue;
 pub use plugin_data::PluginData;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CallInfo {
     pub name: String,
     pub call: EvaluatedCall,
@@ -59,7 +59,7 @@ impl PluginPipelineData {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum CallInput {
     Value(Value),
     Data(PluginData),
@@ -67,7 +67,7 @@ pub enum CallInput {
 }
 
 // Information sent to the plugin
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum PluginCall {
     Signature,
     CallInfo(CallInfo),
