@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Deref};
 
 use serde::{Deserialize, Serialize};
 
@@ -43,11 +43,20 @@ pub(crate) struct OsPipe {
     write_fd: PipeFd<PipeWrite>,
 }
 
-#[derive(PartialEq, Eq)]
 #[repr(transparent)]
 pub struct PipeFd<T: PipeFdType>(pub(crate) NativeFd, pub(crate) PhantomData<T>);
 
 impl<T: PipeFdType> PipeFd<T> {
+    /// Creates a new `PipeFd` from the given raw file descriptor.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it cannot guarantee that the given file descriptor
+    /// is a valid pipe file descriptor ( it could be closed already, for example)
+    pub unsafe fn from_raw_fd(fd: i32) -> Self {
+        Self(NativeFd::from(fd), PhantomData)
+    }
+
     pub fn into_inheritable(self) -> Result<PipeFd<T>, PipeError> {
         let dup = sys::PipeImpl::dup(&self)?;
         self.close()?;
@@ -70,12 +79,6 @@ impl PipeFd<PipeWrite> {
 impl<T: PipeFdType> PipeFd<T> {
     pub fn try_clone(&self) -> Result<PipeFd<T>, PipeError> {
         sys::PipeImpl::dup(self)
-    }
-}
-
-impl<T: PipeFdType> From<i32> for PipeFd<T> {
-    fn from(val: i32) -> Self {
-        PipeFd(val.as_native_fd(), PhantomData)
     }
 }
 
@@ -109,36 +112,51 @@ impl<T: PipeFdType> From<PipeFd<T>> for NativeFd {
 }
 
 trait IntoPipeFd<T: PipeFdType>: AsNativeFd {
-    fn into_pipe_fd(self) -> PipeFd<T>;
+    unsafe fn into_pipe_fd(self) -> PipeFd<T>;
 }
 
-impl<T: PipeFdType, F: AsNativeFd> IntoPipeFd<T> for F {
-    fn into_pipe_fd(self) -> PipeFd<T> {
-        PipeFd(self.as_native_fd(), PhantomData)
+impl<T: PipeFdType> IntoPipeFd<T> for NativeFd {
+    unsafe fn into_pipe_fd(self) -> PipeFd<T> {
+        PipeFd::from_raw_fd(self)
     }
 }
 
 pub trait AsNativeFd {
     /// Returns the native handle of the object.
-    fn as_native_fd(&self) -> NativeFd;
+    ///
+    /// # Safety
+    ///
+    /// The returned handle is not guaranteed to be valid and this could be used to violate the IO safety
+    /// provided by the library.
+    unsafe fn native_fd(&self) -> NativeFd;
+}
+pub trait NativeFdEq: AsNativeFd {
+    fn eq(&self, other: impl AsNativeFd) -> bool;
+}
+
+impl<T: NativeFdEq> NativeFdEq for &T {
+    #[inline]
+    fn eq(&self, other: impl AsNativeFd) -> bool {
+        unsafe { self.native_fd() == other.native_fd() }
+    }
 }
 
 impl<T: PipeFdType> AsNativeFd for PipeFd<T> {
     #[inline]
-    fn as_native_fd(&self) -> NativeFd {
+    unsafe fn native_fd(&self) -> NativeFd {
         self.0
     }
 }
 impl AsNativeFd for NativeFd {
     #[inline]
-    fn as_native_fd(&self) -> NativeFd {
+    unsafe fn native_fd(&self) -> NativeFd {
         *self
     }
 }
 impl<T: AsNativeFd> AsNativeFd for &T {
     #[inline]
-    fn as_native_fd(&self) -> NativeFd {
-        (*self).as_native_fd()
+    unsafe fn native_fd(&self) -> NativeFd {
+        (*self).native_fd()
     }
 }
 
@@ -182,12 +200,6 @@ impl<T: PipeFdType, F: AsPipeFd<T>> AsPipeFd<T> for &F {
         (*self).as_pipe_fd()
     }
 }
-impl<T: PipeFdType> AsNativeFd for dyn AsPipeFd<T> {
-    #[inline]
-    fn as_native_fd(&self) -> NativeFd {
-        self.as_pipe_fd().as_native_fd()
-    }
-}
 
 pub trait PipeFdHasType {
     fn get_type(&self) -> PipeFdTypeEnum;
@@ -206,6 +218,14 @@ impl<T: PipeFdType> std::fmt::Display for PipeFd<T> {
         #[cfg(unix)]
         let fd = self.0;
         write!(f, "{:?} ({})", T::NAME, fd)
+    }
+}
+
+impl<T: PipeFdType> Deref for PipeFd<T> {
+    type Target = NativeFd;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -240,5 +260,43 @@ impl<'de, T: PipeFdType> Deserialize<'de> for PipeFd<T> {
             )));
         }
         Ok(PipeFd(fd.0, PhantomData))
+    }
+}
+
+impl<T: PipeFdType, U: PipeFdType> PartialEq<PipeFd<U>> for PipeFd<T> {
+    fn eq(&self, other: &PipeFd<U>) -> bool {
+        self.0 == other.0 && T::TYPE == U::TYPE
+    }
+}
+impl<T: PipeFdType> Eq for PipeFd<T> {}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        unidirectional::{PipeRead, PipeWrite},
+        PipeFd,
+    };
+    #[test]
+    fn pipe_fd_eq_if_same_native_fd() {
+        let fd1 = unsafe { PipeFd::<PipeRead>::from_raw_fd(1) };
+        let fd2 = unsafe { PipeFd::<PipeRead>::from_raw_fd(1) };
+        assert_eq!(fd1, fd2);
+
+        let fd3 = unsafe { PipeFd::<PipeRead>::from_raw_fd(2) };
+        assert_ne!(fd1, fd3);
+    }
+
+    #[test]
+    fn pipe_fd_neq_if_diff_native_fd() {
+        let fd1 = unsafe { PipeFd::<PipeRead>::from_raw_fd(1) };
+        let fd2 = unsafe { PipeFd::<PipeRead>::from_raw_fd(2) };
+        assert_ne!(fd1, fd2);
+    }
+
+    #[test]
+    fn pipe_fd_neq_if_diff_type() {
+        let fd1 = unsafe { PipeFd::<PipeRead>::from_raw_fd(1) };
+        let fd2 = unsafe { PipeFd::<PipeWrite>::from_raw_fd(1) };
+        assert_ne!(fd1, fd2);
     }
 }

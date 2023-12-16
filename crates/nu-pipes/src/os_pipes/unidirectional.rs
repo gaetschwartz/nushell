@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn assert_pipe_cant_be_transmuted() {
-        let read = PipeFd::<PipeRead>::from(42);
+        let read: PipeFd<PipeRead> = unsafe { PipeFd::from_raw_fd(42) };
 
         let serialized = serde_json::to_string(&read).unwrap();
         println!("{}", serialized);

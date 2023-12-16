@@ -55,12 +55,13 @@ fn pipes_with_closed_read_end_cant_write() {
     assert_eq!(written, 11);
 
     let mut buf = [0u8; 11];
-    reader.read(&mut buf).unwrap();
+    let read = reader.read(&mut buf).unwrap();
+    assert_eq!(read, 11);
     assert_eq!(&buf[..], "hello world".as_bytes());
 
     reader.close().unwrap();
 
-    let written = writer.write("hello world".as_bytes());
+    let written = writer.write("woohoo ohoho".as_bytes());
     let flushed = writer.flush();
 
     assert!(

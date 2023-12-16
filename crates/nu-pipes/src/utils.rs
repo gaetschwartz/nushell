@@ -84,17 +84,30 @@ pub fn catch_result<T, E: std::error::Error, F: FnOnce() -> Result<T, E>>(f: F) 
     f()
 }
 
+pub(crate) const LIBC_CALL_ERROR: &str = "Failed to call ";
+#[macro_export(local_inner_macros)]
+macro_rules! libc_call_error {
+    ($call:expr) => {
+        konst::string::str_concat!(&[
+            $crate::utils::LIBC_CALL_ERROR,
+            "`",
+            std::stringify!($call),
+            "`"
+        ])
+    };
+}
+
 #[macro_export]
 macro_rules! libc_call {
     ($call:expr) => {{
         let res = unsafe { $call };
         if res < 0 {
-            return Err($crate::errors::PipeError::last_os_error(format!(
-                "Failed to call {}",
-                stringify!($call)
-            )));
+            Err($crate::errors::PipeError::last_os_error(
+                $crate::libc_call_error!($call),
+            ))
+        } else {
+            Ok(res)
         }
-        res
     }};
     // takes a placeholder var that will be sent as a mutable pointer to the call
     // returns the value of the placeholder var
@@ -105,11 +118,75 @@ macro_rules! libc_call {
         let mut $var = $var_value;
         let res = unsafe { $call };
         if res < 0 {
-            return Err($crate::errors::PipeError::last_os_error(format!(
-                "Failed to call {}",
-                stringify!($call)
-            )));
+            Err($crate::errors::PipeError::last_os_error(
+                $crate::libc_call_error!($call),
+            ))
+        } else {
+            Ok($var)
         }
-        $var
     }};
+}
+
+#[cfg(test)]
+#[allow(unused_unsafe, unused_mut)]
+mod tests {
+    #[test]
+    fn libc_call_returns_value() {
+        let res = libc_call!(42);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), 42);
+    }
+
+    fn write_to(data: &mut isize, value: isize) -> isize {
+        *data = value * 2;
+        value - 1
+    }
+
+    #[test]
+    fn libc_call_returns_value_with_placeholder() {
+        let res = libc_call!(write_to(&mut data, 42), data => 0);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), 84);
+    }
+
+    #[test]
+    fn libc_call_returns_error() {
+        let res = libc_call!(-1);
+        assert!(res.is_err());
+    }
+    #[test]
+    fn libc_call_returns_error_containing_function_name() {
+        fn my_erroring_func() -> isize {
+            -1
+        }
+        let res = libc_call!(my_erroring_func());
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains(stringify!(my_erroring_func)));
+
+        let res = libc_call!(my_erroring_func(), data => 0);
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains(stringify!(my_erroring_func)));
+
+        // fallback to the full call if the function name can't be extracted
+        let res = libc_call!(5 - 7);
+        assert!(res.is_err(), "Expected error, got {:?}", res);
+        assert!(res.unwrap_err().to_string().contains("5 - 7"));
+
+        let res = libc_call!(  5 - 7, data => 0);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("5 - 7"));
+    }
+
+    #[test]
+    fn libc_call_returns_error_with_placeholder() {
+        let res = libc_call!(write_to(&mut data, 0), data => 0);
+        assert!(res.is_err());
+        println!("{:?}", res);
+    }
 }

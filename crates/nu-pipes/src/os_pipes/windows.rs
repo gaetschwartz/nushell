@@ -134,7 +134,7 @@ impl PipeImplBase for Win32PipeImpl {
 pub(crate) struct FdSerializable(pub isize);
 
 impl AsNativeFd for i32 {
-    fn as_native_fd(&self) -> NativeFd {
+    unsafe fn native_fd(&self) -> NativeFd {
         windows::Win32::Foundation::HANDLE(*self as isize)
     }
 }
