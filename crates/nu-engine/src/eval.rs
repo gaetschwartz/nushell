@@ -1,5 +1,5 @@
 use crate::{current_dir_str, get_full_help};
-use nu_path::expand_path_with;
+use nu_path::{expand_path, expand_path_with};
 use nu_protocol::{
     ast::{
         Argument, Assignment, Block, Call, Expr, Expression, PathMember, PipelineElement,
@@ -897,13 +897,13 @@ impl Eval for EvalRuntime {
     type MutState = Stack;
 
     fn eval_filepath(
-        engine_state: Self::State<'_>,
-        stack: &mut Self::MutState,
+        _engine_state: Self::State<'_>,
+        _stack: &mut Self::MutState,
         path: String,
         span: Span,
     ) -> Result<Value, ShellError> {
-        let cwd = current_dir_str(engine_state, stack)?;
-        let path = expand_path_with(path, cwd);
+        // let cwd = current_dir_str(engine_state, stack)?;
+        let path = expand_path(path);
 
         Ok(Value::string(path.to_string_lossy(), span))
     }

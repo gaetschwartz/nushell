@@ -30,9 +30,7 @@ impl Command for Ln {
             .input_output_types(vec![(Type::Nothing, Type::Nothing)])
             .required(
                 "target",
-                // TODO: Take a FilePath instead of a string here.
-                // For now we're using a string because nu resolves relative paths for us which we don't want.
-                SyntaxShape::String,
+                SyntaxShape::Filepath,
                 "The file or directory to link to.",
             )
             .required(

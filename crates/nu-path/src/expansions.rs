@@ -50,7 +50,7 @@ where
     canonicalize(path)
 }
 
-fn expand_path(path: impl AsRef<Path>) -> PathBuf {
+pub fn expand_path(path: impl AsRef<Path>) -> PathBuf {
     let path = expand_to_real_path(path);
     expand_dots(path)
 }
