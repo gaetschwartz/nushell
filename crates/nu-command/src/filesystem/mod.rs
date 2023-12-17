@@ -1,6 +1,7 @@
 mod cd;
 mod cp;
 mod glob;
+mod ln;
 mod ls;
 mod mkdir;
 mod mktemp;
@@ -19,6 +20,7 @@ pub use self::open::Open;
 pub use cd::Cd;
 pub use cp::Cp;
 pub use glob::Glob;
+pub use ln::Ln;
 pub use ls::Ls;
 pub use mkdir::Mkdir;
 pub use mktemp::Mktemp;

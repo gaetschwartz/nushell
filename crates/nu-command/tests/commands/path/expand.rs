@@ -35,7 +35,7 @@ fn expands_path_without_follow_symlink() {
         let actual = nu!(
             cwd: dirs.test(), pipeline(
             r#"
-                ln -s spam.txt menu/spam_link.ln;
+                ^ln -s spam.txt menu/spam_link.ln;
                 echo "menu/./spam_link.ln"
                 | path expand -n
             "#

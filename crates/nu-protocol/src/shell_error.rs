@@ -732,6 +732,19 @@ pub enum ShellError {
         span: Span,
     },
 
+    /// File already exists during a nushell operation and the operation cannot continue.
+    ///
+    /// ## Resolution
+    ///
+    /// The command you are running requires that the file does not exist. Either delete the file, use a different command,
+    /// or check if the command has a flag to overwrite the file.
+    #[error("File already exists")]
+    #[diagnostic(code(nu::shell::file_already_exists))]
+    FileAlreadyExists {
+        #[label("file already exists")]
+        span: Span,
+    },
+
     /// A plugin failed to load.
     ///
     /// ## Resolution
