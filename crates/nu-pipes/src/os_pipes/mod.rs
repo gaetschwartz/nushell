@@ -1,4 +1,8 @@
-use std::{marker::PhantomData, ops::Deref};
+use std::{
+    marker::PhantomData,
+    ops::Deref,
+    os::fd::{AsFd, AsRawFd, BorrowedFd},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -153,6 +157,24 @@ impl<T: AsNativeFd> AsNativeFd for &T {
         (*self).native_fd()
     }
 }
+impl<T: PipeFdType> AsRawFd for PipeFd<T> {
+    fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
+        #[cfg(windows)]
+        {
+            self.0 .0 as _;
+        }
+        #[cfg(unix)]
+        {
+            self.0 as _
+        }
+    }
+}
+
+impl<T: PipeFdType> AsFd for PipeFd<T> {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        unsafe { BorrowedFd::borrow_raw(self.as_raw_fd()) }
+    }
+}
 
 pub trait AsPipeFd<T: PipeFdType> {
     fn as_pipe_fd(&self) -> &PipeFd<T>;
@@ -263,6 +285,29 @@ impl<T: PipeFdType, U: PipeFdType> PartialEq<PipeFd<U>> for PipeFd<T> {
     }
 }
 impl<T: PipeFdType> Eq for PipeFd<T> {}
+
+pub trait PipeOrStdin {
+    fn or_stdin(self) -> PipeFd<PipeRead>;
+}
+impl PipeOrStdin for Option<PipeFd<PipeRead>> {
+    fn or_stdin(self) -> PipeFd<PipeRead> {
+        match self {
+            Some(pipe) => pipe,
+            None => unsafe { PipeFd::from_raw_fd(0) },
+        }
+    }
+}
+pub trait PipeOrStdout {
+    fn or_stdout(self) -> PipeFd<PipeWrite>;
+}
+impl PipeOrStdout for Option<PipeFd<PipeWrite>> {
+    fn or_stdout(self) -> PipeFd<PipeWrite> {
+        match self {
+            Some(pipe) => pipe,
+            None => unsafe { PipeFd::from_raw_fd(1) },
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

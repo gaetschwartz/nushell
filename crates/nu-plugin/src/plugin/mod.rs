@@ -1,8 +1,11 @@
 mod declaration;
 pub use declaration::PluginDeclaration;
 use nu_engine::documentation::get_flags_section;
-use nu_pipes::PipeReaderCustomValue;
+use nu_pipes::unidirectional::{PipeRead, PipeWrite};
+use nu_pipes::{PipeFd, PipeReader, PipeReaderCustomValue, PipeWriter};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 
 use crate::protocol::{
     CallInput, LabeledError, PluginCall, PluginData, PluginPipelineData, PluginResponse,
@@ -10,9 +13,9 @@ use crate::protocol::{
 use crate::EncodingType;
 use std::env;
 use std::fmt::Write;
-use std::io::{BufReader, ErrorKind, Read, Write as WriteTrait};
+use std::io::{BufReader, ErrorKind, Write as WriteTrait};
 use std::path::Path;
-use std::process::{Child, ChildStdout, Command as CommandSys, Stdio};
+use std::process::{Command as CommandSys, Stdio};
 
 use nu_protocol::{CustomValue, PluginSignature, ShellError, Span, Value};
 
@@ -51,77 +54,90 @@ pub trait PluginEncoder: Clone {
     ) -> Result<PluginResponse, ShellError>;
 }
 
-pub(crate) fn create_command(path: &Path, shell: Option<&Path>) -> CommandSys {
-    let mut process = match (path.extension(), shell) {
+pub(crate) struct PluginCommand {
+    pub(crate) command: CommandSys,
+    pub(crate) stdin: PipeFd<PipeWrite>,
+    pub(crate) stdout: PipeFd<PipeRead>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct PluginPipes {
+    pub(crate) stdin: PipeFd<PipeRead>,
+    pub(crate) stdout: PipeFd<PipeWrite>,
+}
+
+pub(crate) fn create_command(path: &Path, shell: Option<&Path>) -> PluginCommand {
+    let (stdin_pipe_read, stdin_pipe_write) = nu_pipes::unidirectional::pipe().unwrap();
+    let (stdout_pipe_read, stdout_pipe_write) = nu_pipes::unidirectional::pipe().unwrap();
+    let stdin_read_inheritable = stdin_pipe_read.into_inheritable().unwrap();
+    let stdout_write_inheritable = stdout_pipe_write.into_inheritable().unwrap();
+    let pipes_ser = serde_json::to_string(&PluginPipes {
+        stdin: stdin_read_inheritable,
+        stdout: stdout_write_inheritable,
+    })
+    .unwrap();
+
+    let process = match (path.extension(), shell) {
         (_, Some(shell)) => {
             let mut process = std::process::Command::new(shell);
             process.arg(path);
+            process.arg(&pipes_ser);
 
             process
         }
         (Some(extension), None) => {
-            let (shell, separator) = match extension.to_str() {
-                Some("cmd") | Some("bat") => (Some("cmd"), Some("/c")),
-                Some("sh") => (Some("sh"), Some("-c")),
-                Some("py") => (Some("python"), None),
-                _ => (None, None),
-            };
-
-            match (shell, separator) {
-                (Some(shell), Some(separator)) => {
-                    let mut process = std::process::Command::new(shell);
-                    process.arg(separator);
-                    process.arg(path);
-
-                    process
-                }
-                (Some(shell), None) => {
-                    let mut process = std::process::Command::new(shell);
-                    process.arg(path);
-
-                    process
-                }
-                _ => std::process::Command::new(path),
+            match extension.to_str() {
+                // Some("cmd") | Some("bat") => ("cmd".as_ref(), vec!["/c".as_ref(), path, pipes_ser]),
+                Some("cmd") | Some("bat") => CommandBuilder::new("cmd")
+                    .arg("/c")
+                    .arg(path)
+                    .arg(&pipes_ser)
+                    .build(),
+                // Some("sh") => ("sh".as_ref(), vec!["-c".as_ref(), path, pipes_ser]),
+                Some("sh") => CommandBuilder::new("sh")
+                    .arg("-c")
+                    .arg(path)
+                    .arg(&pipes_ser)
+                    .build(),
+                // Some("py") => ("python".as_ref(), vec![path, pipes_ser]),
+                Some("py") => CommandBuilder::new("python")
+                    .arg(path)
+                    .arg(&pipes_ser)
+                    .build(),
+                // _ => (path, vec![pipes_ser]),
+                _ => CommandBuilder::new(path).arg(&pipes_ser).build(),
             }
         }
-        (None, None) => std::process::Command::new(path),
+        (None, None) => CommandBuilder::new(path).arg(&pipes_ser).build(),
     };
 
-    // Both stdout and stdin are piped so we can receive information from the plugin
-    process.stdout(Stdio::piped()).stdin(Stdio::piped());
-
-    process
+    PluginCommand {
+        command: process,
+        stdin: stdin_pipe_write,
+        stdout: stdout_pipe_read,
+    }
 }
 
 pub(crate) fn call_plugin(
-    child: &mut Child,
+    plugin_cmd: &PluginCommand,
     plugin_call: PluginCall,
     encoding: &EncodingType,
-    span: Span,
+    _span: Span,
 ) -> Result<PluginResponse, ShellError> {
-    if let Some(mut stdin_writer) = child.stdin.take() {
-        let encoding_clone = encoding.clone();
-        // If the child process fills its stdout buffer, it may end up waiting until the parent
-        // reads the stdout, and not be able to read stdin in the meantime, causing a deadlock.
-        // Writing from another thread ensures that stdout is being read at the same time, avoiding the problem.
-        std::thread::spawn(move || encoding_clone.encode_call(&plugin_call, &mut stdin_writer));
-    }
+    let encoding_clone = encoding.clone();
+    // If the child process fills its stdout buffer, it may end up waiting until the parent
+    // reads the stdout, and not be able to read stdin in the meantime, causing a deadlock.
+    // Writing from another thread ensures that stdout is being read at the same time, avoiding the problem.
+    std::thread::scope(|s| {
+        let mut stdin_writer = PipeWriter::new(&plugin_cmd.stdin);
+        s.spawn(move || encoding_clone.encode_call(&plugin_call, &mut stdin_writer));
 
-    // Deserialize response from plugin to extract the resulting value
-    if let Some(stdout_reader) = &mut child.stdout {
-        let reader = stdout_reader;
-        let mut buf_read = BufReader::with_capacity(OUTPUT_BUFFER_SIZE, reader);
+        // Deserialize response from plugin to extract the resulting value
 
-        encoding.decode_response(&mut buf_read)
-    } else {
-        Err(ShellError::GenericError {
-            error: "Error with stdout reader".into(),
-            msg: "no stdout reader".into(),
-            span: Some(span),
-            help: None,
-            inner: vec![],
-        })
-    }
+        let mut reader = PipeReader::new(&plugin_cmd.stdout);
+
+        encoding.decode_response(&mut reader)
+    })
 }
 
 #[doc(hidden)] // Note: not for plugin authors / only used in nu-parser
@@ -131,10 +147,14 @@ pub fn get_signature(
     current_envs: &HashMap<String, String>,
 ) -> Result<Vec<PluginSignature>, ShellError> {
     let mut plugin_cmd = create_command(path, shell);
-    let program_name = plugin_cmd.get_program().to_os_string().into_string();
+    let program_name = plugin_cmd
+        .command
+        .get_program()
+        .to_os_string()
+        .into_string();
 
-    plugin_cmd.envs(current_envs);
-    let mut child = plugin_cmd.spawn().map_err(|err| {
+    plugin_cmd.command.envs(current_envs);
+    let mut child = plugin_cmd.command.spawn().map_err(|err| {
         let error_msg = match err.kind() {
             ErrorKind::NotFound => match program_name {
                 Ok(prog_name) => {
@@ -152,18 +172,8 @@ pub fn get_signature(
         ShellError::PluginFailedToLoad { msg: error_msg }
     })?;
 
-    let mut stdin_writer = child
-        .stdin
-        .take()
-        .ok_or_else(|| ShellError::PluginFailedToLoad {
-            msg: "plugin missing stdin writer".into(),
-        })?;
-    let mut stdout_reader = child
-        .stdout
-        .take()
-        .ok_or_else(|| ShellError::PluginFailedToLoad {
-            msg: "Plugin missing stdout reader".into(),
-        })?;
+    let mut stdout_reader = PipeReader::new(&plugin_cmd.stdout);
+    let mut stdin_writer = PipeWriter::new(&plugin_cmd.stdin);
     let encoding = get_plugin_encoding(&mut stdout_reader)?;
 
     // Create message to plugin to indicate that signature is required and
@@ -172,14 +182,13 @@ pub fn get_signature(
     // If the child process fills its stdout buffer, it may end up waiting until the parent
     // reads the stdout, and not be able to read stdin in the meantime, causing a deadlock.
     // Writing from another thread ensures that stdout is being read at the same time, avoiding the problem.
-    std::thread::spawn(move || {
-        encoding_clone.encode_call(&PluginCall::Signature, &mut stdin_writer)
-    });
-
-    // deserialize response from plugin to extract the signature
-    let reader = stdout_reader;
-    let mut buf_read = BufReader::with_capacity(OUTPUT_BUFFER_SIZE, reader);
-    let response = encoding.decode_response(&mut buf_read)?;
+    let response = std::thread::scope(|s| {
+        s.spawn(move || encoding_clone.encode_call(&PluginCall::Signature, &mut stdin_writer));
+        // deserialize response from plugin to extract the signature
+        let reader = stdout_reader;
+        let mut buf_read = BufReader::with_capacity(OUTPUT_BUFFER_SIZE, reader);
+        encoding.decode_response(&mut buf_read)
+    })?;
 
     let signatures = match response {
         PluginResponse::Signature(sign) => Ok(sign),
@@ -289,32 +298,38 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
         std::process::exit(0)
     }
 
+    let Some(pipes_ser) = env::args().nth(1) else {
+        eprintln!("Missing pipes argument");
+        std::process::exit(1)
+    };
+    let plugin_pipes: PluginPipes = serde_json::from_str(&pipes_ser).unwrap();
+    let mut stdout_writer = PipeWriter::new(&plugin_pipes.stdout);
+    let mut stdin_reader = PipeReader::new(&plugin_pipes.stdin);
+
     // tell nushell encoding.
     //
     //                         1 byte
     // encoding format: |  content-length  | content    |
     {
-        let mut stdout = std::io::stdout();
         let encoding = encoder.name();
         let length = encoding.len() as u8;
         let mut encoding_content: Vec<u8> = encoding.as_bytes().to_vec();
         encoding_content.insert(0, length);
-        stdout
+        stdout_writer
             .write_all(&encoding_content)
             .expect("Failed to tell nushell my encoding");
-        stdout
+        stdout_writer
             .flush()
             .expect("Failed to tell nushell my encoding when flushing stdout");
     }
 
-    let mut stdin_buf = BufReader::with_capacity(OUTPUT_BUFFER_SIZE, std::io::stdin());
-    let plugin_call = encoder.decode_call(&mut stdin_buf);
+    let plugin_call = encoder.decode_call(&mut stdin_reader);
 
     match plugin_call {
         Err(err) => {
             let response = PluginResponse::Error(err.into());
             encoder
-                .encode_response(&response, &mut std::io::stdout())
+                .encode_response(&response, &mut stdout_writer)
                 .expect("Error encoding response");
         }
         Ok(plugin_call) => {
@@ -323,7 +338,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                 PluginCall::Signature => {
                     let response = PluginResponse::Signature(plugin.signature());
                     encoder
-                        .encode_response(&response, &mut std::io::stdout())
+                        .encode_response(&response, &mut stdout_writer)
                         .expect("Error encoding response");
                 }
                 PluginCall::CallInfo(call_info) => {
@@ -393,7 +408,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                         Err(err) => PluginResponse::Error(err),
                     };
                     encoder
-                        .encode_response(&response, &mut std::io::stdout())
+                        .encode_response(&response, &mut stdout_writer)
                         .expect("Error encoding response");
                 }
                 PluginCall::CollapseCustomValue(plugin_data) => {
@@ -407,7 +422,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
                         .map_or_else(PluginResponse::Error, PluginResponse::Value);
 
                     encoder
-                        .encode_response(&response, &mut std::io::stdout())
+                        .encode_response(&response, &mut stdout_writer)
                         .expect("Error encoding response");
                 }
             }
@@ -483,7 +498,9 @@ fn print_help(plugin: &mut impl Plugin, encoder: impl PluginEncoder) {
     println!("{help}")
 }
 
-pub fn get_plugin_encoding(child_stdout: &mut ChildStdout) -> Result<EncodingType, ShellError> {
+pub fn get_plugin_encoding(
+    child_stdout: &mut impl std::io::BufRead,
+) -> Result<EncodingType, ShellError> {
     let mut length_buf = [0u8; 1];
     child_stdout
         .read_exact(&mut length_buf)
@@ -504,4 +521,82 @@ pub fn get_plugin_encoding(child_stdout: &mut ChildStdout) -> Result<EncodingTyp
             msg: format!("get unsupported plugin encoding: {encoding_for_debug}"),
         }
     })
+}
+
+pub struct CommandBuilder<'a, C: AsRef<OsStr>> {
+    cmd: C,
+    args: Vec<&'a OsStr>,
+    envs: HashMap<String, String>,
+    stdin: Stdio,
+    stdout: Stdio,
+    stderr: Stdio,
+    current_dir: Option<&'a Path>,
+}
+
+#[allow(dead_code)]
+impl<'a, C: AsRef<OsStr>> CommandBuilder<'a, C> {
+    pub fn new(cmd: C) -> Self {
+        Self {
+            cmd,
+            args: vec![],
+            envs: HashMap::new(),
+            stdin: Stdio::inherit(),
+            stdout: Stdio::inherit(),
+            stderr: Stdio::inherit(),
+            current_dir: None,
+        }
+    }
+
+    pub fn arg<'b: 'a, S: AsRef<OsStr> + ?Sized>(mut self, arg: &'b S) -> Self {
+        self.args.push(arg.as_ref());
+        self
+    }
+
+    pub fn args(mut self, args: Vec<&'a OsStr>) -> Self {
+        self.args.extend(args);
+        self
+    }
+
+    pub fn env(mut self, key: &str, value: &str) -> Self {
+        self.envs.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn envs(mut self, envs: &HashMap<String, String>) -> Self {
+        self.envs.extend(envs.clone());
+        self
+    }
+
+    pub fn stdin(mut self, stdin: Stdio) -> Self {
+        self.stdin = stdin;
+        self
+    }
+
+    pub fn stdout(mut self, stdout: Stdio) -> Self {
+        self.stdout = stdout;
+        self
+    }
+
+    pub fn stderr(mut self, stderr: Stdio) -> Self {
+        self.stderr = stderr;
+        self
+    }
+
+    pub fn current_dir(mut self, current_dir: &'a Path) -> Self {
+        self.current_dir = Some(current_dir);
+        self
+    }
+
+    pub fn build(self) -> CommandSys {
+        let mut cmd = CommandSys::new(self.cmd);
+        cmd.args(self.args);
+        cmd.envs(self.envs);
+        cmd.stdin(self.stdin);
+        cmd.stdout(self.stdout);
+        cmd.stderr(self.stderr);
+        if let Some(current_dir) = self.current_dir {
+            cmd.current_dir(current_dir);
+        }
+        cmd
+    }
 }

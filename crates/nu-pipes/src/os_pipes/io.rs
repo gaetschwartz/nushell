@@ -56,6 +56,15 @@ impl std::io::Read for PipeReader<'_> {
     }
 }
 
+impl std::io::BufRead for PipeReader<'_> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        self.reader.fill_buf()
+    }
+    fn consume(&mut self, amt: usize) {
+        self.reader.consume(amt)
+    }
+}
+
 pub struct OwningPipeReader {
     pub(crate) reader: BufReader<RawPipeReader<PipeFd<PipeRead>>>,
 }
@@ -99,6 +108,14 @@ impl std::fmt::Debug for OwningPipeReader {
 impl std::io::Read for OwningPipeReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.reader.read(buf)
+    }
+}
+impl std::io::BufRead for OwningPipeReader {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        self.reader.fill_buf()
+    }
+    fn consume(&mut self, amt: usize) {
+        self.reader.consume(amt)
     }
 }
 

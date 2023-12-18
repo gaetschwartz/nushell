@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use nu_pipes::PipeReader;
 use nu_protocol::{CustomValue, ShellError, Value};
 use serde::Serialize;
 
@@ -47,34 +48,30 @@ impl CustomValue for PluginCustomValue {
     ) -> Result<nu_protocol::Value, nu_protocol::ShellError> {
         let mut plugin_cmd = create_command(&self.filename, self.shell.as_deref());
 
-        let mut child = plugin_cmd.spawn().map_err(|err| ShellError::GenericError {
-            error: format!(
-                "Unable to spawn plugin for {} to get base value",
-                self.source
-            ),
-            msg: format!("{err}"),
-            span: Some(span),
-            help: None,
-            inner: vec![],
-        })?;
+        let mut child = plugin_cmd
+            .command
+            .spawn()
+            .map_err(|err| ShellError::GenericError {
+                error: format!(
+                    "Unable to spawn plugin for {} to get base value",
+                    self.source
+                ),
+                msg: format!("{err}"),
+                span: Some(span),
+                help: None,
+                inner: vec![],
+            })?;
 
         let plugin_call = PluginCall::CollapseCustomValue(PluginData {
             data: self.data.clone(),
             span,
         });
         let encoding = {
-            let stdout_reader = match &mut child.stdout {
-                Some(out) => out,
-                None => {
-                    return Err(ShellError::PluginFailedToLoad {
-                        msg: "Plugin missing stdout reader".into(),
-                    })
-                }
-            };
-            get_plugin_encoding(stdout_reader)?
+            let mut stdout_reader = PipeReader::new(&plugin_cmd.stdout);
+            get_plugin_encoding(&mut stdout_reader)?
         };
 
-        let response = call_plugin(&mut child, plugin_call, &encoding, span).map_err(|err| {
+        let response = call_plugin(&plugin_cmd, plugin_call, &encoding, span).map_err(|err| {
             ShellError::GenericError {
                 error: format!(
                     "Unable to decode call for {} to get base value",

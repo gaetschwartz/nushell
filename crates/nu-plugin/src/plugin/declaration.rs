@@ -10,7 +10,7 @@ use std::thread;
 
 use log::trace;
 use nu_pipes::unidirectional::{pipe, PipeWrite};
-use nu_pipes::{PipeFd, StreamSender};
+use nu_pipes::{PipeFd, PipeReader, StreamSender};
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::{ast::Call, PluginSignature, Signature};
 use nu_protocol::{Example, PipelineData, RawStream, ShellError, Value};
@@ -156,11 +156,12 @@ impl Command for PluginDeclaration {
         // We need the current environment variables for `python` based plugins
         // Or we'll likely have a problem when a plugin is implemented in a virtual Python environment.
         let current_envs = nu_engine::env::env_to_strings(engine_state, stack).unwrap_or_default();
-        plugin_cmd.envs(current_envs);
+        plugin_cmd.command.envs(current_envs);
 
         let (call_input, pipe, stdout) = self.make_call_input(input, call)?.spread_pipe();
+        let (_out_pipe_read, _out_pipe_write) = nu_pipes::unidirectional::pipe()?;
 
-        let mut child = plugin_cmd.spawn().map_err(|err| {
+        let mut child = plugin_cmd.command.spawn().map_err(|err| {
             let decl = engine_state.get_decl(call.decl_id);
             ShellError::GenericError {
                 error: format!("Unable to spawn plugin for {}", decl.name()),
@@ -185,19 +186,12 @@ impl Command for PluginDeclaration {
             });
 
             let encoding = {
-                let stdout_reader = match &mut child.stdout {
-                    Some(out) => out,
-                    None => {
-                        return Err(ShellError::PluginFailedToLoad {
-                            msg: "Plugin missing stdout reader".into(),
-                        })
-                    }
-                };
-                get_plugin_encoding(stdout_reader)?
+                let mut stdout_reader = PipeReader::new(&plugin_cmd.stdout);
+                get_plugin_encoding(&mut stdout_reader)?
             };
 
             let response =
-                call_plugin(&mut child, plugin_call, &encoding, call.head).map_err(|err| {
+                call_plugin(&plugin_cmd, plugin_call, &encoding, call.head).map_err(|err| {
                     let decl = engine_state.get_decl(call.decl_id);
                     ShellError::GenericError {
                         error: format!("Unable to decode call for {}", decl.name()),

@@ -34,6 +34,7 @@ impl PipeImplBase for PipeImpl {
             }
         }
 
+        trace_pipe!("created pipe {:?}", fds);
         Ok(OsPipe {
             read_fd: unsafe { fds[0].into_pipe_fd() },
             write_fd: unsafe { fds[1].into_pipe_fd() },
