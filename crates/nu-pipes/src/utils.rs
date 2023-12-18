@@ -14,20 +14,21 @@ macro_rules! function {
     }};
 }
 
-#[allow(dead_code)]
-pub(crate) const fn trace_pipes_enabled() -> bool {
-    match option_env!("NU_TRACE_PIPES") {
+pub fn trace_pipes_enabled() -> bool {
+    match std::option_env!("NU_TRACE_PIPES") {
         Some(s) => konst::const_eq!(s, "1") || konst::const_eq!(s, "true"),
         _ => false,
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn exec_name() -> String {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
-        .unwrap_or("???".to_string())
+#[macro_export(local_inner_macros)]
+macro_rules! exec_name {
+    () => {{
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
+            .unwrap_or("???".to_string())
+    }};
 }
 
 #[macro_export]
@@ -44,7 +45,7 @@ macro_rules! trace_pipe {
             const ORANGE_ANSI: &str = "\x1b[38;5;208m";
 
             let mut lock = std::io::stderr().lock();
-            let s = format!("[{BLUE_ANSI}{}{RESET_ANSI}@{LIGHT_BLUE_ANSI}{}{RESET_ANSI}] {DIMMED_ANSI}({}:{}){RESET_ANSI} {ORANGE_ANSI}{}{RESET_ANSI}: {}",$crate::utils::exec_name(),std::thread::current().name().unwrap_or("<unnamed>"), file!(), line!(), $crate::function!(), format_args!($($arg)+), RESET_ANSI = RESET_ANSI, DIMMED_ANSI = DIMMED_ANSI);
+            let s = format!("[{BLUE_ANSI}{}{RESET_ANSI}@{LIGHT_BLUE_ANSI}{}{RESET_ANSI}] {DIMMED_ANSI}({}:{}){RESET_ANSI} {ORANGE_ANSI}{}{RESET_ANSI}: {}",$crate::exec_name!(),std::thread::current().name().unwrap_or("<unnamed>"), file!(), line!(), $crate::function!(), format_args!($($arg)+), RESET_ANSI = RESET_ANSI, DIMMED_ANSI = DIMMED_ANSI);
             lock.write_all(s.as_bytes()).unwrap();
             lock.write_all(b"\n").unwrap();
         }

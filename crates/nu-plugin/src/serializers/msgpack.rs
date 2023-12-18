@@ -1,4 +1,4 @@
-use crate::{plugin::PluginEncoder, protocol::PluginResponse};
+use crate::{plugin::PluginCodec, protocol::PluginResponse};
 use nu_protocol::ShellError;
 
 /// A `PluginEncoder` that enables the plugin to communicate with Nushel with MsgPack
@@ -6,7 +6,7 @@ use nu_protocol::ShellError;
 #[derive(Clone, Debug)]
 pub struct MsgPackSerializer;
 
-impl PluginEncoder for MsgPackSerializer {
+impl PluginCodec for MsgPackSerializer {
     fn name(&self) -> &str {
         "msgpack"
     }
@@ -16,11 +16,17 @@ impl PluginEncoder for MsgPackSerializer {
         plugin_call: &crate::protocol::PluginCall,
         writer: &mut impl std::io::Write,
     ) -> Result<(), nu_protocol::ShellError> {
-        rmp_serde::encode::write(writer, plugin_call).map_err(|err| {
+        let mut writer = writer;
+        rmp_serde::encode::write(&mut writer, plugin_call).map_err(|err| {
             ShellError::PluginFailedToEncode {
                 msg: err.to_string(),
             }
-        })
+        })?;
+        writer
+            .flush()
+            .map_err(|e| ShellError::PluginFailedToEncode {
+                msg: format!("Failed to flush writer: {}", e),
+            })
     }
 
     fn decode_call(
@@ -37,11 +43,17 @@ impl PluginEncoder for MsgPackSerializer {
         plugin_response: &PluginResponse,
         writer: &mut impl std::io::Write,
     ) -> Result<(), ShellError> {
-        rmp_serde::encode::write(writer, plugin_response).map_err(|err| {
+        let mut writer = writer;
+        rmp_serde::encode::write(&mut writer, plugin_response).map_err(|err| {
             ShellError::PluginFailedToEncode {
                 msg: err.to_string(),
             }
-        })
+        })?;
+        writer
+            .flush()
+            .map_err(|e| ShellError::PluginFailedToEncode {
+                msg: format!("Failed to flush writer: {}", e),
+            })
     }
 
     fn decode_response(

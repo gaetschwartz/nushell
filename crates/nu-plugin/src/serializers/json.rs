@@ -1,13 +1,15 @@
+use std::io::Write;
+
 use nu_protocol::ShellError;
 
-use crate::{plugin::PluginEncoder, protocol::PluginResponse};
+use crate::{plugin::PluginCodec, protocol::PluginResponse};
 
 /// A `PluginEncoder` that enables the plugin to communicate with Nushel with JSON
 /// serialized data.
 #[derive(Clone, Debug)]
 pub struct JsonSerializer;
 
-impl PluginEncoder for JsonSerializer {
+impl PluginCodec for JsonSerializer {
     fn name(&self) -> &str {
         "json"
     }
@@ -17,9 +19,17 @@ impl PluginEncoder for JsonSerializer {
         plugin_call: &crate::protocol::PluginCall,
         writer: &mut impl std::io::Write,
     ) -> Result<(), nu_protocol::ShellError> {
-        serde_json::to_writer(writer, plugin_call).map_err(|err| ShellError::PluginFailedToEncode {
-            msg: err.to_string(),
-        })
+        let mut writer = writer;
+        serde_json::to_writer(&mut writer, plugin_call).map_err(|err| {
+            ShellError::PluginFailedToEncode {
+                msg: err.to_string(),
+            }
+        })?;
+        writer
+            .flush()
+            .map_err(|e| ShellError::PluginFailedToEncode {
+                msg: format!("Failed to flush writer: {}", e),
+            })
     }
 
     fn decode_call(
@@ -36,11 +46,17 @@ impl PluginEncoder for JsonSerializer {
         plugin_response: &PluginResponse,
         writer: &mut impl std::io::Write,
     ) -> Result<(), ShellError> {
-        serde_json::to_writer(writer, plugin_response).map_err(|err| {
+        let mut writer = writer;
+        serde_json::to_writer(&mut writer, plugin_response).map_err(|err| {
             ShellError::PluginFailedToEncode {
                 msg: err.to_string(),
             }
-        })
+        })?;
+        writer
+            .flush()
+            .map_err(|e| ShellError::PluginFailedToEncode {
+                msg: format!("Failed to flush writer: {}", e),
+            })
     }
 
     fn decode_response(

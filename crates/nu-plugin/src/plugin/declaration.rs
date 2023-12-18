@@ -10,7 +10,7 @@ use std::thread;
 
 use log::trace;
 use nu_pipes::unidirectional::{pipe, PipeWrite};
-use nu_pipes::{PipeFd, PipeReader, StreamSender};
+use nu_pipes::{trace_pipe, PipeFd, PipeReader, StreamSender};
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::{ast::Call, PluginSignature, Signature};
 use nu_protocol::{Example, PipelineData, RawStream, ShellError, Value};
@@ -151,15 +151,23 @@ impl Command for PluginDeclaration {
         // Call the command with self path
         // Decode information from plugin
         // Create PipelineData
-        let source_file = Path::new(&self.filename);
-        let mut plugin_cmd = create_command(source_file, self.shell.as_deref());
+        let mut plugin_cmd = create_command(&self.filename, self.shell.as_deref());
+        trace_pipe!(
+            "Created command for plugin: `{} {}`",
+            plugin_cmd.command.get_program().to_string_lossy(),
+            plugin_cmd
+                .command
+                .get_args()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
         // We need the current environment variables for `python` based plugins
         // Or we'll likely have a problem when a plugin is implemented in a virtual Python environment.
         let current_envs = nu_engine::env::env_to_strings(engine_state, stack).unwrap_or_default();
         plugin_cmd.command.envs(current_envs);
 
-        let (call_input, pipe, stdout) = self.make_call_input(input, call)?.spread_pipe();
-        let (_out_pipe_read, _out_pipe_write) = nu_pipes::unidirectional::pipe()?;
+        let (call_input, pipe, stream) = self.make_call_input(input, call)?.spread_pipe();
 
         let mut child = plugin_cmd.command.spawn().map_err(|err| {
             let decl = engine_state.get_decl(call.decl_id);
@@ -172,9 +180,18 @@ impl Command for PluginDeclaration {
             }
         })?;
 
+        trace_pipe!("Spawned plugin, getting encoding");
+
+        let encoding = {
+            let mut stdout_reader = PipeReader::new(&plugin_cmd.stdout);
+            get_plugin_encoding(&mut stdout_reader)?
+        };
+
+        trace_pipe!("Got encoding ({:?}), calling plugin", encoding);
+
         thread::scope(|s| {
-            let join_handle = if let (Some(pipe), Some(stdout)) = (pipe, stdout) {
-                pipe.send_stream_scoped(s, stdout)?
+            let join_handle = if let (Some(pipe), Some(stream)) = (pipe, stream) {
+                pipe.send_stream_scoped(s, stream)?
             } else {
                 None
             };
@@ -184,11 +201,6 @@ impl Command for PluginDeclaration {
                 call: EvaluatedCall::try_from_call(call, engine_state, stack)?,
                 input: call_input,
             });
-
-            let encoding = {
-                let mut stdout_reader = PipeReader::new(&plugin_cmd.stdout);
-                get_plugin_encoding(&mut stdout_reader)?
-            };
 
             let response =
                 call_plugin(&plugin_cmd, plugin_call, &encoding, call.head).map_err(|err| {
@@ -201,6 +213,8 @@ impl Command for PluginDeclaration {
                         inner: Vec::new(),
                     }
                 });
+
+            trace_pipe!("Got response from plugin");
 
             let pipeline_data = match response {
                 Ok(PluginResponse::Value(value)) => {

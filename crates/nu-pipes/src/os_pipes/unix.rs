@@ -56,13 +56,21 @@ impl PipeImplBase for PipeImpl {
             buf.len(),
         ))?;
 
-        trace_pipe!("read {} bytes", bytes_read);
+        trace_pipe!(
+            "read {:?} from {:?}",
+            String::from_utf8_lossy(&buf[..bytes_read as usize]),
+            fd.as_pipe_fd()
+        );
 
         Ok(bytes_read as usize)
     }
 
     fn write(fd: impl AsPipeFd<PipeWrite>, buf: &[u8]) -> PipeResult<usize> {
-        trace_pipe!("writing {:?} bytes to {:?}", buf.len(), fd.as_pipe_fd());
+        trace_pipe!(
+            "writing {:?} to {:?}",
+            String::from_utf8_lossy(buf),
+            fd.as_pipe_fd()
+        );
 
         let written = libc_call!(libc::write(
             fd.as_pipe_fd().native_fd(),
@@ -70,7 +78,7 @@ impl PipeImplBase for PipeImpl {
             buf.len(),
         ))?;
 
-        trace_pipe!("wrote {} bytes", written);
+        trace_pipe!("wrote {} bytes to {:?}", written, fd.as_pipe_fd());
 
         Ok(written as usize)
     }
