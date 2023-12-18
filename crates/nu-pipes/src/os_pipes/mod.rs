@@ -1,7 +1,8 @@
 use std::{
     marker::PhantomData,
     ops::Deref,
-    os::fd::{AsFd, AsRawFd, BorrowedFd},
+    os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, RawFd},
+    process::Stdio,
 };
 
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,29 @@ impl<T: PipeFdType> PipeFd<T> {
         let dup = sys::PipeImpl::dup(&self)?;
         self.close()?;
         Ok(dup)
+    }
+
+    pub fn stdin() -> PipeFd<T> {
+        unsafe { PipeFd::from_raw_fd(0) }
+    }
+
+    pub fn stdout() -> PipeFd<T> {
+        unsafe { PipeFd::from_raw_fd(1) }
+    }
+
+    pub fn stderr() -> PipeFd<T> {
+        unsafe { PipeFd::from_raw_fd(2) }
+    }
+}
+
+impl<T: PipeFdType> From<PipeFd<T>> for Stdio {
+    fn from(val: PipeFd<T>) -> Self {
+        unsafe { Stdio::from_raw_fd(val.as_raw_fd()) }
+    }
+}
+impl<T: PipeFdType> From<&PipeFd<T>> for Stdio {
+    fn from(val: &PipeFd<T>) -> Self {
+        unsafe { Stdio::from_raw_fd(val.as_raw_fd()) }
     }
 }
 
@@ -158,7 +182,7 @@ impl<T: AsNativeFd> AsNativeFd for &T {
     }
 }
 impl<T: PipeFdType> AsRawFd for PipeFd<T> {
-    fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
+    fn as_raw_fd(&self) -> RawFd {
         #[cfg(windows)]
         {
             self.0 .0 as _;

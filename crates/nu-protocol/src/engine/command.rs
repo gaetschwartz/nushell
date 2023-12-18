@@ -101,6 +101,11 @@ pub trait Command: Send + Sync + CommandClone {
         false
     }
 
+    // Whether the plugin supports multiple inputs, only applicable to plugin commands
+    fn supports_pipe_io(&self) -> bool {
+        false
+    }
+
     // Whether can run in const evaluation in the parser
     fn is_const(&self) -> bool {
         false

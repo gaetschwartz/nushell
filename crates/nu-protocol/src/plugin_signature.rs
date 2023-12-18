@@ -12,6 +12,8 @@ pub struct PluginSignature {
     pub examples: Vec<PluginExample>,
     #[serde(default)]
     pub supports_pipelined_input: bool,
+    #[serde(default)]
+    supports_pipe_io: bool,
 }
 
 impl PluginSignature {
@@ -19,11 +21,13 @@ impl PluginSignature {
         sig: Signature,
         examples: Vec<PluginExample>,
         supports_pipelined_input: bool,
+        supports_pipe_io: bool,
     ) -> PluginSignature {
         Self {
             sig,
             examples,
             supports_pipelined_input,
+            supports_pipe_io,
         }
     }
 
@@ -36,7 +40,7 @@ impl PluginSignature {
     /// Build an internal signature with default help option
     pub fn build(name: impl Into<String>) -> PluginSignature {
         let sig = Signature::new(name.into()).add_help();
-        Self::new(sig, vec![], false)
+        Self::new(sig, vec![], false, false)
     }
 
     /// Add a description to the signature
@@ -242,5 +246,9 @@ impl PluginSignature {
 
     pub fn get_supports_pipelined_input(&self) -> bool {
         self.supports_pipelined_input
+    }
+
+    pub fn get_supports_pipe_io(&self) -> bool {
+        self.supports_pipe_io
     }
 }

@@ -64,18 +64,22 @@ pub(crate) struct PluginPipes {
     pub(crate) stdout: PipeFd<PipeWrite>,
 }
 
-pub(crate) fn create_command(path: &Path, shell: Option<&Path>) -> PluginCommand {
+pub(crate) fn create_command(
+    path: &Path,
+    shell: Option<&Path>,
+    supports_pipe_io: bool,
+) -> PluginCommand {
     let (stdin_pipe_read, stdin_pipe_write) = nu_pipes::unidirectional::pipe().unwrap();
     let (stdout_pipe_read, stdout_pipe_write) = nu_pipes::unidirectional::pipe().unwrap();
     let stdin_read_inheritable = stdin_pipe_read.into_inheritable().unwrap();
     let stdout_write_inheritable = stdout_pipe_write.into_inheritable().unwrap();
-    let pipes_ser = serde_json::to_string(&PluginPipes {
+    let plugin_pipes = PluginPipes {
         stdin: stdin_read_inheritable,
         stdout: stdout_write_inheritable,
-    })
-    .unwrap();
+    };
+    let pipes_ser = serde_json::to_string(&plugin_pipes).unwrap();
 
-    let process = match (path.extension(), shell) {
+    let mut process = match (path.extension(), shell) {
         (_, Some(shell)) => {
             let mut process = std::process::Command::new(shell);
             process.arg(path);
@@ -108,6 +112,12 @@ pub(crate) fn create_command(path: &Path, shell: Option<&Path>) -> PluginCommand
         }
         (None, None) => CommandBuilder::new(path).arg(&pipes_ser).build(),
     };
+
+    if !supports_pipe_io {
+        process
+            .stdin(plugin_pipes.stdin)
+            .stdout(plugin_pipes.stdout);
+    }
 
     PluginCommand {
         command: process,
@@ -143,12 +153,13 @@ pub(crate) fn call_plugin(
 }
 
 #[doc(hidden)] // Note: not for plugin authors / only used in nu-parser
+/// In this function we assume the plugin doesnt support the new piped io feature.
 pub fn get_signature(
     path: &Path,
     shell: Option<&Path>,
     current_envs: &HashMap<String, String>,
 ) -> Result<Vec<PluginSignature>, ShellError> {
-    let mut plugin_cmd = create_command(path, shell);
+    let mut plugin_cmd = create_command(path, shell, false);
     let program_name = plugin_cmd
         .command
         .get_program()
@@ -197,10 +208,15 @@ pub fn get_signature(
     // reads the stdout, and not be able to read stdin in the meantime, causing a deadlock.
     // Writing from another thread ensures that stdout is being read at the same time, avoiding the problem.
     let response = std::thread::scope(|s| {
-        s.spawn(move || encoding_clone.encode_call(&PluginCall::Signature, &mut stdin_writer));
+        let handle =
+            s.spawn(move || encoding_clone.encode_call(&PluginCall::Signature, &mut stdin_writer));
         // deserialize response from plugin to extract the signature
         trace_pipe!("Reading plugin response...");
-        encoding.decode_response(&mut stdout_reader)
+        let decode_response = encoding.decode_response(&mut stdout_reader);
+
+        handle.join().unwrap()?;
+
+        decode_response
     })?;
 
     let signatures = match response {
@@ -256,11 +272,6 @@ pub trait Plugin {
     /// of this plugin. Since a single plugin executable can support multiple invocation
     /// patterns we return a `Vec` of signatures.
     fn signature(&self) -> Vec<PluginSignature>;
-
-    /// Whether the plugin supports pipelined input
-    fn supports_pipelined_input(&self) -> bool {
-        false
-    }
 
     /// Perform the actual behavior of the plugin
     ///

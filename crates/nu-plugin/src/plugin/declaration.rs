@@ -141,6 +141,10 @@ impl Command for PluginDeclaration {
         self.signature.supports_pipelined_input
     }
 
+    fn supports_pipe_io(&self) -> bool {
+        self.signature.get_supports_pipe_io()
+    }
+
     fn run(
         &self,
         engine_state: &EngineState,
@@ -151,7 +155,15 @@ impl Command for PluginDeclaration {
         // Call the command with self path
         // Decode information from plugin
         // Create PipelineData
-        let mut plugin_cmd = create_command(&self.filename, self.shell.as_deref());
+        trace_pipe!(
+            "Plugin supports pipe io: {}",
+            self.signature.get_supports_pipe_io()
+        );
+        let mut plugin_cmd = create_command(
+            &self.filename,
+            self.shell.as_deref(),
+            self.supports_pipe_io(),
+        );
         trace_pipe!(
             "Created command for plugin: `{} {}`",
             plugin_cmd.command.get_program().to_string_lossy(),

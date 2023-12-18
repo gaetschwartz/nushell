@@ -46,7 +46,8 @@ impl CustomValue for PluginCustomValue {
         &self,
         span: nu_protocol::Span,
     ) -> Result<nu_protocol::Value, nu_protocol::ShellError> {
-        let mut plugin_cmd = create_command(&self.filename, self.shell.as_deref());
+        // We assume here the plugin doesnt support pipe io.
+        let mut plugin_cmd = create_command(&self.filename, self.shell.as_deref(), false);
 
         let mut child = plugin_cmd
             .command
