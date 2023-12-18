@@ -1,6 +1,8 @@
 use std::io::Write;
 
 use nu_protocol::ShellError;
+use serde::{de::DeserializeOwned, Serialize};
+use serde_json::{de::IoRead, StreamDeserializer};
 
 use crate::{plugin::PluginCodec, protocol::PluginResponse};
 
@@ -19,26 +21,14 @@ impl PluginCodec for JsonSerializer {
         plugin_call: &crate::protocol::PluginCall,
         writer: &mut impl std::io::Write,
     ) -> Result<(), nu_protocol::ShellError> {
-        let mut writer = writer;
-        serde_json::to_writer(&mut writer, plugin_call).map_err(|err| {
-            ShellError::PluginFailedToEncode {
-                msg: err.to_string(),
-            }
-        })?;
-        writer
-            .flush()
-            .map_err(|e| ShellError::PluginFailedToEncode {
-                msg: format!("Failed to flush writer: {}", e),
-            })
+        Self::encode(writer, plugin_call)
     }
 
     fn decode_call(
         &self,
         reader: &mut impl std::io::BufRead,
     ) -> Result<crate::protocol::PluginCall, nu_protocol::ShellError> {
-        serde_json::from_reader(reader).map_err(|err| ShellError::PluginFailedToEncode {
-            msg: err.to_string(),
-        })
+        Self::decode(reader)
     }
 
     fn encode_response(
@@ -46,8 +36,21 @@ impl PluginCodec for JsonSerializer {
         plugin_response: &PluginResponse,
         writer: &mut impl std::io::Write,
     ) -> Result<(), ShellError> {
+        Self::encode(writer, plugin_response)
+    }
+
+    fn decode_response(
+        &self,
+        reader: &mut impl std::io::BufRead,
+    ) -> Result<PluginResponse, ShellError> {
+        Self::decode(reader)
+    }
+}
+
+impl JsonSerializer {
+    fn encode<T: Serialize>(writer: &mut impl Write, data: &T) -> Result<(), ShellError> {
         let mut writer = writer;
-        serde_json::to_writer(&mut writer, plugin_response).map_err(|err| {
+        serde_json::to_writer(&mut writer, data).map_err(|err| {
             ShellError::PluginFailedToEncode {
                 msg: err.to_string(),
             }
@@ -59,18 +62,24 @@ impl PluginCodec for JsonSerializer {
             })
     }
 
-    fn decode_response(
-        &self,
-        reader: &mut impl std::io::BufRead,
-    ) -> Result<PluginResponse, ShellError> {
-        serde_json::from_reader(reader).map_err(|err| ShellError::PluginFailedToEncode {
-            msg: err.to_string(),
-        })
+    fn decode<T: DeserializeOwned>(reader: &mut impl std::io::BufRead) -> Result<T, ShellError> {
+        let mut deserializer: StreamDeserializer<'_, _, T> =
+            StreamDeserializer::new(IoRead::new(reader));
+        deserializer
+            .next()
+            .ok_or_else(|| ShellError::PluginFailedToEncode {
+                msg: "Failed to find a plugin call".to_string(),
+            })?
+            .map_err(|err| ShellError::PluginFailedToEncode {
+                msg: err.to_string(),
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufReader, BufWriter};
+
     use super::*;
     use crate::protocol::{
         CallInfo, CallInput, EvaluatedCall, LabeledError, PluginCall, PluginData, PluginResponse,
@@ -82,12 +91,20 @@ mod tests {
         let plugin_call = PluginCall::Signature;
         let encoder = JsonSerializer {};
 
-        let mut buffer: Vec<u8> = Vec::new();
-        encoder
-            .encode_call(&plugin_call, &mut buffer)
-            .expect("unable to serialize message");
+        let mut buf = Vec::new();
+        {
+            let mut writer = BufWriter::new(&mut buf);
+            encoder
+                .encode_call(&plugin_call, &mut writer)
+                .expect("unable to serialize message");
+            writer.write_all(b" lll").expect("unable to write");
+        }
+
+        println!("Buf: {:?}", String::from_utf8_lossy(&buf));
+
+        let mut reader = BufReader::new(buf.as_slice());
         let returned = encoder
-            .decode_call(&mut buffer.as_slice())
+            .decode_call(&mut reader)
             .expect("unable to deserialize message");
 
         match returned {

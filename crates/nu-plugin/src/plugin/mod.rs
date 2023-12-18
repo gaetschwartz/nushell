@@ -13,15 +13,13 @@ use crate::protocol::{
 use crate::EncodingType;
 use std::env;
 use std::fmt::Write;
-use std::io::{BufReader, ErrorKind, Write as WriteTrait};
+use std::io::{ErrorKind, Write as WriteTrait};
 use std::path::Path;
 use std::process::{Command as CommandSys, Stdio};
 
 use nu_protocol::{CustomValue, PluginSignature, ShellError, Span, Value};
 
 use super::EvaluatedCall;
-
-pub(crate) const OUTPUT_BUFFER_SIZE: usize = 8192;
 
 /// Encoding scheme that defines a plugin's communication protocol with Nu
 pub trait PluginCodec: Clone {
@@ -314,8 +312,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, codec: impl PluginCodec) {
     }
 
     let Some(pipes_ser) = env::args().nth(1) else {
-        eprintln!("Expected pipe serialization as first argument but got none");
-        eprintln!("Environment args: {:?}", std::env::args());
+        eprintln!("Expected nu_pipes as first argument but got nothing. This is likely due to the fact that your Nushell version is too old. Please update to the latest version of Nushell.");
 
         std::process::exit(1)
     };
@@ -331,8 +328,9 @@ pub fn serve_plugin(plugin: &mut impl Plugin, codec: impl PluginCodec) {
     // encoding format: |  content-length  | content    |
     {
         let encoding = codec.name();
-        let mut encoding_content: Vec<u8> = Vec::with_capacity(encoding.len() + 1);
-        encoding_content.insert(0, encoding.len() as u8);
+        let length = encoding.len();
+        let mut encoding_content: Vec<u8> = Vec::with_capacity(length + 1);
+        encoding_content.insert(0, length as u8);
         encoding_content.extend_from_slice(encoding.as_bytes());
         stdout_writer
             .write_all(&encoding_content)
