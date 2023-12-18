@@ -1,7 +1,12 @@
+use std::{
+    os::windows::io::{AsRawHandle, FromRawHandle, RawHandle},
+    process::Stdio,
+};
+
 use serde::{Deserialize, Serialize};
 use windows::Win32::{
     Foundation::{
-        CloseHandle, DuplicateHandle, BOOL, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE,
+        CloseHandle, DuplicateHandle, BOOL, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE, HANDLE,
         INVALID_HANDLE_VALUE,
     },
     Security::SECURITY_ATTRIBUTES,
@@ -12,10 +17,11 @@ use windows::Win32::{
 use crate::{
     trace_pipe,
     unidirectional::{PipeFdType, PipeRead, PipeWrite},
-    AsNativeFd, AsPipeFd, OsPipe, PipeFd, PipeResult,
+    AsNativeFd, AsPipeFd, AsRawPipeFd, FromNativeFd, FromRawPipeFd, OsPipe, PipeFd, PipeResult,
+    RawPipeFd,
 };
 
-use super::{IntoPipeFd, PipeError, PipeImplBase};
+use super::{PipeError, PipeImplBase};
 
 pub type NativeFd = windows::Win32::Foundation::HANDLE;
 pub type OSError = windows::core::Error;
@@ -45,9 +51,10 @@ impl PipeImplBase for Win32PipeImpl {
                 0,
             )
         }?;
+
         Ok(OsPipe {
-            read_fd: unsafe { read_fd.into_pipe_fd() },
-            write_fd: unsafe { write_fd.into_pipe_fd() },
+            read_fd: unsafe { PipeFd::from_native_fd(read_fd) },
+            write_fd: unsafe { PipeFd::from_native_fd(write_fd) },
         })
     }
 
@@ -119,7 +126,7 @@ impl PipeImplBase for Win32PipeImpl {
                 DUPLICATE_SAME_ACCESS,
             )
         }?;
-        let dup_fd = unsafe { new_fd.into_pipe_fd() };
+        let dup_fd = unsafe { PipeFd::from_native_fd(new_fd) };
         trace_pipe!("Duplicated {:?} to {:?}", fd.as_pipe_fd(), dup_fd);
 
         Ok(dup_fd)
@@ -133,15 +140,46 @@ impl PipeImplBase for Win32PipeImpl {
 #[serde(remote = "windows::Win32::Foundation::HANDLE")]
 pub(crate) struct FdSerializable(pub isize);
 
-impl AsNativeFd for i32 {
-    unsafe fn native_fd(&self) -> NativeFd {
-        windows::Win32::Foundation::HANDLE(*self as isize)
+impl<T: PipeFdType> AsRawHandle for PipeFd<T> {
+    fn as_raw_handle(&self) -> RawHandle {
+        self.0 .0 as _
+    }
+}
+impl<T: PipeFdType> FromRawHandle for PipeFd<T> {
+    unsafe fn from_raw_handle(handle: RawHandle) -> Self {
+        Self(HANDLE(handle as _), std::marker::PhantomData)
     }
 }
 
-impl<T: PipeFdType> IntoPipeFd<T> for NativeFd {
-    unsafe fn into_pipe_fd(self) -> PipeFd<T> {
-        PipeFd::from_raw_fd(self.0 as i32)
+impl<T: FromRawHandle> FromRawPipeFd for T {
+    #[inline]
+    unsafe fn from_raw_pipe_fd(fd: RawPipeFd) -> Self {
+        Self::from_raw_handle(fd as _)
+    }
+}
+
+impl AsRawPipeFd for NativeFd {
+    #[inline]
+    unsafe fn as_raw_pipe_fd(&self) -> RawPipeFd {
+        self.0 as _
+    }
+}
+
+impl<T: PipeFdType> FromNativeFd for PipeFd<T> {
+    unsafe fn from_native_fd(fd: NativeFd) -> PipeFd<T> {
+        PipeFd::from_raw_pipe_fd(fd.as_raw_pipe_fd())
+    }
+}
+
+impl<T: PipeFdType> From<PipeFd<T>> for Stdio {
+    fn from(val: PipeFd<T>) -> Self {
+        unsafe { Stdio::from_raw_handle(val.as_raw_handle()) }
+    }
+}
+
+impl<T: PipeFdType> From<&PipeFd<T>> for Stdio {
+    fn from(val: &PipeFd<T>) -> Self {
+        unsafe { Stdio::from_raw_handle(val.as_raw_handle()) }
     }
 }
 
