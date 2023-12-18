@@ -173,7 +173,7 @@ impl From<ShellError> for LabeledError {
 // Needs to be public to communicate with nu-parser but not typically
 // used by Plugin authors
 #[doc(hidden)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum PluginResponse {
     Error(LabeledError),
     Signature(Vec<PluginSignature>),

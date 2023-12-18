@@ -72,7 +72,7 @@ impl CustomValue for PluginCustomValue {
             get_plugin_encoding(&mut stdout_reader)?
         };
 
-        let response = call_plugin(&plugin_cmd, plugin_call, &encoding, span).map_err(|err| {
+        let response = call_plugin(plugin_cmd, plugin_call, &encoding, span).map_err(|err| {
             ShellError::GenericError {
                 error: format!(
                     "Unable to decode call for {} to get base value",

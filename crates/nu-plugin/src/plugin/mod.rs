@@ -71,12 +71,11 @@ pub(crate) fn create_command(
 ) -> PluginCommand {
     let (stdin_pipe_read, stdin_pipe_write) = nu_pipes::unidirectional::pipe().unwrap();
     let (stdout_pipe_read, stdout_pipe_write) = nu_pipes::unidirectional::pipe().unwrap();
-    let stdin_read_inheritable = stdin_pipe_read.into_inheritable().unwrap();
-    let stdout_write_inheritable = stdout_pipe_write.into_inheritable().unwrap();
     let plugin_pipes = PluginPipes {
-        stdin: stdin_read_inheritable,
-        stdout: stdout_write_inheritable,
+        stdin: stdin_pipe_read.into_inheritable().unwrap(),
+        stdout: stdout_pipe_write.into_inheritable().unwrap(),
     };
+
     let pipes_ser = serde_json::to_string(&plugin_pipes).unwrap();
 
     let mut process = match (path.extension(), shell) {
@@ -127,7 +126,7 @@ pub(crate) fn create_command(
 }
 
 pub(crate) fn call_plugin(
-    plugin_cmd: &PluginCommand,
+    plugin_cmd: PluginCommand,
     plugin_call: PluginCall,
     encoding: &EncodingType,
     _span: Span,
@@ -137,16 +136,32 @@ pub(crate) fn call_plugin(
     // Writing from another thread ensures that stdout is being read at the same time, avoiding the problem.
     std::thread::scope(|s| {
         let encoding_clone = encoding.clone();
-        let mut stdin_writer = PipeWriter::new(&plugin_cmd.stdin);
-        let handle = s.spawn(move || encoding_clone.encode_call(&plugin_call, &mut stdin_writer));
+        let handle = s.spawn(move || {
+            let mut stdin_writer = plugin_cmd.stdin.into_writer();
+            encoding_clone
+                .encode_call(&plugin_call, &mut stdin_writer)
+                .and_then(|_| {
+                    stdin_writer
+                        .close()
+                        .map_err(|err| ShellError::PluginFailedToLoad {
+                            msg: format!("Failed to close stdin: {}", err.error()),
+                        })
+                })
+        });
 
         // Deserialize response from plugin to extract the resulting value
 
-        let mut reader = PipeReader::new(&plugin_cmd.stdout);
+        let mut stdout_reader = plugin_cmd.stdout.into_reader();
 
-        let res = encoding.decode_response(&mut reader)?;
+        let res = encoding.decode_response(&mut stdout_reader)?;
 
         handle.join().unwrap()?;
+
+        stdout_reader
+            .close()
+            .map_err(|err| ShellError::PluginFailedToLoad {
+                msg: format!("Failed to close stdout: {}", err.error()),
+            })?;
 
         Ok(res)
     })
@@ -195,8 +210,8 @@ pub fn get_signature(
         ShellError::PluginFailedToLoad { msg: error_msg }
     })?;
 
-    let mut stdout_reader = PipeReader::new(&plugin_cmd.stdout);
-    let mut stdin_writer = PipeWriter::new(&plugin_cmd.stdin);
+    let mut stdout_reader = plugin_cmd.stdout.into_reader();
+    let mut stdin_writer = plugin_cmd.stdin.into_writer();
     trace_pipe!("Getting encoding from plugin...");
     let encoding = get_plugin_encoding(&mut stdout_reader)?;
     trace_pipe!("Got encoding ({:?}), calling plugin", encoding);
@@ -208,13 +223,25 @@ pub fn get_signature(
     // reads the stdout, and not be able to read stdin in the meantime, causing a deadlock.
     // Writing from another thread ensures that stdout is being read at the same time, avoiding the problem.
     let response = std::thread::scope(|s| {
-        let handle =
-            s.spawn(move || encoding_clone.encode_call(&PluginCall::Signature, &mut stdin_writer));
+        let res = s.spawn(move || {
+            encoding_clone
+                .encode_call(&PluginCall::Signature, &mut stdin_writer)
+                .and_then(|_| {
+                    stdin_writer
+                        .close()
+                        .map_err(|err| ShellError::PluginFailedToLoad {
+                            msg: format!("Failed to close stdin: {}", err.error()),
+                        })
+                })
+        });
         // deserialize response from plugin to extract the signature
         trace_pipe!("Reading plugin response...");
+
         let decode_response = encoding.decode_response(&mut stdout_reader);
 
-        handle.join().unwrap()?;
+        trace_pipe!("Got plugin response: {:?}", decode_response);
+
+        res.join().unwrap()?;
 
         decode_response
     })?;

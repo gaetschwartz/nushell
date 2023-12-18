@@ -56,6 +56,11 @@ impl JsonSerializer {
             }
         })?;
         writer
+            .write_all(b" ")
+            .map_err(|e| ShellError::PluginFailedToEncode {
+                msg: format!("Failed to write newline: {}", e),
+            })?;
+        writer
             .flush()
             .map_err(|e| ShellError::PluginFailedToEncode {
                 msg: format!("Failed to flush writer: {}", e),

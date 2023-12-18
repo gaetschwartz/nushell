@@ -215,7 +215,7 @@ impl Command for PluginDeclaration {
             });
 
             let response =
-                call_plugin(&plugin_cmd, plugin_call, &encoding, call.head).map_err(|err| {
+                call_plugin(plugin_cmd, plugin_call, &encoding, call.head).map_err(|err| {
                     let decl = engine_state.get_decl(call.decl_id);
                     ShellError::GenericError {
                         error: format!("Unable to decode call for {}", decl.name()),
