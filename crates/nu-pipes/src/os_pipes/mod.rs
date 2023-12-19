@@ -1,5 +1,5 @@
 #[cfg(unix)]
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::{marker::PhantomData, ops::Deref};
 
 use serde::{Deserialize, Serialize};
@@ -54,20 +54,6 @@ impl<T: PipeFdType> PipeFd<T> {
         let dup = sys::PipeImpl::dup(&self)?;
         self.close()?;
         Ok(dup)
-    }
-}
-
-#[cfg(unix)]
-impl<T: PipeFdType> From<PipeFd<T>> for Stdio {
-    fn from(val: PipeFd<T>) -> Self {
-        unsafe { Stdio::from_raw_pipe_fd(val.as_raw_fd()) }
-    }
-}
-
-#[cfg(unix)]
-impl<T: PipeFdType> From<&PipeFd<T>> for Stdio {
-    fn from(val: &PipeFd<T>) -> Self {
-        unsafe { Stdio::from_raw_pipe_fd(val.as_raw_fd()) }
     }
 }
 

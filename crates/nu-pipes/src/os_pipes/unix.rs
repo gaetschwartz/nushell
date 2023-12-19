@@ -1,8 +1,10 @@
+use std::{marker::PhantomData, os::fd::FromRawFd, process::Stdio};
+
 use crate::{
     errors::PipeResult,
     libc_call, trace_pipe,
     unidirectional::{PipeFdType, PipeRead, PipeWrite},
-    AsNativeFd, AsPipeFd, PipeFd,
+    AsNativeFd, AsPipeFd, AsRawPipeFd, FromRawPipeFd, PipeFd, RawPipeFd,
 };
 
 use super::{IntoPipeFd, OsPipe, PipeError, PipeImplBase};
@@ -86,7 +88,7 @@ impl PipeImplBase for PipeImpl {
     fn dup<T: PipeFdType>(fd: impl AsPipeFd<T>) -> Result<PipeFd<T>, PipeError> {
         let duped = libc_call!(libc::dup(fd.as_pipe_fd().native_fd()))?;
 
-        let dup_fd = unsafe { PipeFd::from_raw_fd(duped) };
+        let dup_fd = unsafe { PipeFd::from_raw_pipe_fd(duped) };
         trace_pipe!("duplicated {:?} to {:?}", fd.as_pipe_fd(), dup_fd);
         Ok(dup_fd)
     }
@@ -94,9 +96,27 @@ impl PipeImplBase for PipeImpl {
     const INVALID_FD_VALUE: NativeFd = -1;
 }
 
-impl<T: PipeFdType> IntoPipeFd<T> for NativeFd {
+impl<T: PipeFdType> FromRawPipeFd for PipeFd<T> {
+    unsafe fn from_raw_pipe_fd(fd: NativeFd) -> Self {
+        PipeFd(fd, PhantomData)
+    }
+}
+
+impl<T: PipeFdType> AsRawPipeFd for PipeFd<T> {
+    unsafe fn as_raw_pipe_fd(&self) -> crate::RawPipeFd {
+        self.0
+    }
+}
+
+impl<T: PipeFdType> IntoPipeFd<T> for RawPipeFd {
     unsafe fn into_pipe_fd(self) -> PipeFd<T> {
-        PipeFd::from_raw_fd(self)
+        PipeFd(self, PhantomData)
+    }
+}
+
+impl<T: PipeFdType> From<PipeFd<T>> for Stdio {
+    fn from(fd: PipeFd<T>) -> Self {
+        unsafe { Stdio::from_raw_fd(fd.native_fd()) }
     }
 }
 
