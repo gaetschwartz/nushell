@@ -2,7 +2,8 @@ mod declaration;
 pub use declaration::PluginDeclaration;
 use nu_engine::documentation::get_flags_section;
 use nu_pipes::unidirectional::{PipeRead, PipeWrite};
-use nu_pipes::{trace_pipe, PipeFd, PipeReader, PipeReaderCustomValue, PipeWriter};
+use nu_pipes::{trace_pipe, PipeFd, PipeReader, PipeWriter};
+use nu_protocol::plugin_protocol::{self};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -67,7 +68,7 @@ pub(crate) struct PluginPipes {
 pub(crate) fn create_command(
     path: &Path,
     shell: Option<&Path>,
-    supports_pipe_io: bool,
+    protocol_version: plugin_protocol::Version,
 ) -> PluginCommand {
     let (stdin_pipe_read, stdin_pipe_write) = nu_pipes::unidirectional::pipe().unwrap();
     let (stdout_pipe_read, stdout_pipe_write) = nu_pipes::unidirectional::pipe().unwrap();
@@ -112,7 +113,7 @@ pub(crate) fn create_command(
         (None, None) => CommandBuilder::new(path).arg(&pipes_ser).build(),
     };
 
-    if !supports_pipe_io {
+    if protocol_version.supports(plugin_protocol::Capability::Pipes) {
         process
             .stdin(plugin_pipes.stdin)
             .stdout(plugin_pipes.stdout);
@@ -168,13 +169,13 @@ pub(crate) fn call_plugin(
 }
 
 #[doc(hidden)] // Note: not for plugin authors / only used in nu-parser
-/// In this function we assume the plugin doesnt support the new piped io feature.
+/// In this function we assume the plugin is of version 1
 pub fn get_signature(
     path: &Path,
     shell: Option<&Path>,
     current_envs: &HashMap<String, String>,
 ) -> Result<Vec<PluginSignature>, ShellError> {
-    let mut plugin_cmd = create_command(path, shell, false);
+    let mut plugin_cmd = create_command(path, shell, plugin_protocol::Version::V1);
     let program_name = plugin_cmd
         .command
         .get_program()
@@ -401,13 +402,6 @@ pub fn serve_plugin(plugin: &mut impl Plugin, codec: impl PluginCodec) {
                         .expect("Error encoding response");
                 }
                 PluginCall::CallInfo(call_info) => {
-                    let signature = plugin.signature();
-                    let current_sig = signature.iter().find(|sig| sig.sig.name == call_info.name);
-
-                    let supports_pipelined_input = current_sig
-                        .map(|sig| sig.supports_pipelined_input)
-                        .unwrap_or(false);
-
                     let input = match call_info.input {
                         CallInput::Value(value) => Ok(PluginPipelineData::Value(value)),
                         CallInput::Data(plugin_data) => {
@@ -420,24 +414,11 @@ pub fn serve_plugin(plugin: &mut impl Plugin, codec: impl PluginCodec) {
                                 })
                                 .map(PluginPipelineData::Value)
                         }
-                        CallInput::Pipe(pipe, dt) => {
-                            if supports_pipelined_input {
-                                Ok(PluginPipelineData::ExternalStream(
-                                    pipe.into_reader(),
-                                    dt,
-                                    call_info.call.head.into(),
-                                ))
-                            } else {
-                                Ok(PluginPipelineData::Value(Value::custom_value(
-                                    Box::new(PipeReaderCustomValue::new(
-                                        pipe,
-                                        dt,
-                                        call_info.call.head,
-                                    )),
-                                    call_info.call.head,
-                                )))
-                            }
-                        }
+                        CallInput::Pipe(pipe, dt) => Ok(PluginPipelineData::ExternalStream(
+                            pipe.into_reader(),
+                            dt,
+                            call_info.call.head.into(),
+                        )),
                     };
 
                     let value = match input {

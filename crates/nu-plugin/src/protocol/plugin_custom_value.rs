@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use nu_pipes::PipeReader;
-use nu_protocol::{CustomValue, ShellError, Value};
+use nu_protocol::{plugin_protocol, CustomValue, ShellError, Value};
 use serde::Serialize;
 
 use crate::plugin::{call_plugin, create_command, get_plugin_encoding};
@@ -31,6 +31,7 @@ pub struct PluginCustomValue {
     pub shell: Option<PathBuf>,
     #[serde(skip)]
     pub source: String,
+    pub protocol_version: plugin_protocol::Version,
 }
 
 impl CustomValue for PluginCustomValue {
@@ -47,7 +48,8 @@ impl CustomValue for PluginCustomValue {
         span: nu_protocol::Span,
     ) -> Result<nu_protocol::Value, nu_protocol::ShellError> {
         // We assume here the plugin doesnt support pipe io.
-        let mut plugin_cmd = create_command(&self.filename, self.shell.as_deref(), false);
+        let mut plugin_cmd =
+            create_command(&self.filename, self.shell.as_deref(), self.protocol_version);
 
         let mut child = plugin_cmd
             .command

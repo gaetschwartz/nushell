@@ -11,9 +11,12 @@ use std::thread;
 use log::trace;
 use nu_pipes::unidirectional::{pipe, PipeWrite};
 use nu_pipes::{trace_pipe, PipeFd, PipeReader, StreamSender};
+use nu_protocol::ast::Call;
 use nu_protocol::engine::{Command, EngineState, Stack};
-use nu_protocol::{ast::Call, PluginSignature, Signature};
-use nu_protocol::{Example, PipelineData, RawStream, ShellError, Value};
+use nu_protocol::plugin_protocol::Capability;
+use nu_protocol::{
+    Example, PipelineData, PluginSignature, RawStream, ShellError, Signature, Value,
+};
 
 #[doc(hidden)] // Note: not for plugin authors / only used in nu-parser
 #[derive(Clone)]
@@ -39,7 +42,7 @@ impl PluginDeclaration {
         mut input: PipelineData,
         call: &Call,
     ) -> Result<CallInputWithOptPipe, ShellError> {
-        if self.signature.supports_pipelined_input {
+        if self.signature.protocol_version.supports(Capability::Pipes) {
             if let PipelineData::ExternalStream {
                 stdout: ref mut stdout @ Some(_),
                 ..
@@ -137,12 +140,8 @@ impl Command for PluginDeclaration {
         res
     }
 
-    fn supports_pipelined_input(&self) -> bool {
-        self.signature.supports_pipelined_input
-    }
-
-    fn supports_pipe_io(&self) -> bool {
-        self.signature.get_supports_pipe_io()
+    fn plugin_protocol_version(&self) -> Option<nu_protocol::plugin_protocol::Version> {
+        Some(self.signature.protocol_version)
     }
 
     fn run(
@@ -156,13 +155,15 @@ impl Command for PluginDeclaration {
         // Decode information from plugin
         // Create PipelineData
         trace_pipe!(
-            "Plugin supports pipe io: {}",
-            self.signature.get_supports_pipe_io()
+            "Plugin supports pipes: {}",
+            self.signature
+                .protocol_version
+                .supports(nu_protocol::plugin_protocol::Capability::Pipes)
         );
         let mut plugin_cmd = create_command(
             &self.filename,
             self.shell.as_deref(),
-            self.supports_pipe_io(),
+            self.signature.protocol_version,
         );
         trace_pipe!(
             "Created command for plugin: `{} {}`",
@@ -240,6 +241,7 @@ impl Command for PluginDeclaration {
                             filename: self.filename.clone(),
                             shell: self.shell.clone(),
                             source: engine_state.get_decl(call.decl_id).name().to_owned(),
+                            protocol_version: self.signature.protocol_version,
                         }),
                         plugin_data.span,
                     ),

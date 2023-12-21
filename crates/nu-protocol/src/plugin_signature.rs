@@ -5,29 +5,27 @@ use serde::Serialize;
 use crate::engine::Command;
 use crate::{BlockId, Category, Flag, PositionalArg, SyntaxShape, Type};
 
+use self::plugin_protocol::Version;
+
 /// A simple wrapper for Signature that includes examples.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginSignature {
     pub sig: Signature,
     pub examples: Vec<PluginExample>,
-    #[serde(default)]
-    pub supports_pipelined_input: bool,
-    #[serde(default)]
-    supports_pipe_io: bool,
+    #[serde(default = "plugin_protocol::Version::none")]
+    pub protocol_version: Version,
 }
 
 impl PluginSignature {
     pub fn new(
         sig: Signature,
         examples: Vec<PluginExample>,
-        supports_pipelined_input: bool,
-        supports_pipe_io: bool,
+        protocol_version: Version,
     ) -> PluginSignature {
         Self {
             sig,
             examples,
-            supports_pipelined_input,
-            supports_pipe_io,
+            protocol_version,
         }
     }
 
@@ -40,7 +38,7 @@ impl PluginSignature {
     /// Build an internal signature with default help option
     pub fn build(name: impl Into<String>) -> PluginSignature {
         let sig = Signature::new(name.into()).add_help();
-        Self::new(sig, vec![], false, false)
+        Self::new(sig, vec![], Version::CURRENT)
     }
 
     /// Add a description to the signature
@@ -238,17 +236,55 @@ impl PluginSignature {
         self
     }
 
-    /// Indicates whether the command supports pipelined input
-    pub fn supports_pipelined_input(mut self, supports: bool) -> PluginSignature {
-        self.supports_pipelined_input = supports;
-        self
+    /// Returns the plugin protocol this plugin is using
+    pub fn get_protocol_version(&self) -> Version {
+        self.protocol_version
+    }
+}
+
+pub mod plugin_protocol {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    #[repr(u8)]
+    pub enum Version {
+        V1 = 1,
+        V2 = 2,
     }
 
-    pub fn get_supports_pipelined_input(&self) -> bool {
-        self.supports_pipelined_input
+    impl Version {
+        pub const CURRENT: Version = Version::V2;
+
+        pub(crate) fn none() -> Version {
+            Version::V1
+        }
+
+        pub fn supports(&self, capability: Capability) -> bool {
+            match self {
+                Version::V1 => false,
+                Version::V2 => match capability {
+                    Capability::Pipes => true,
+                },
+            }
+        }
     }
 
-    pub fn get_supports_pipe_io(&self) -> bool {
-        self.supports_pipe_io
+    #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq)]
+    pub enum Capability {
+        /// The plugin can accept pipelined input
+        Pipes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn protocol_version_ordering() {
+        use super::Version;
+        assert!(Version::V1 < Version::V2);
+        assert!(Version::V1 <= Version::V2);
+
+        assert!(Version::V2 > Version::V1);
+        assert!(Version::V2 >= Version::V1);
     }
 }

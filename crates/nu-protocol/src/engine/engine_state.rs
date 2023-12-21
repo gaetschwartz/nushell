@@ -493,8 +493,8 @@ impl EngineState {
                     let sig_with_examples = PluginSignature::new(
                         sig,
                         examples,
-                        decl.supports_pipelined_input(),
-                        decl.supports_pipe_io(),
+                        decl.plugin_protocol_version()
+                            .expect("plugin protocol version should be set"),
                     );
                     serde_json::to_string_pretty(&sig_with_examples)
                         .map(|signature| {

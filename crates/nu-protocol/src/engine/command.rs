@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use crate::{ast::Call, Alias, BlockId, Example, PipelineData, ShellError, Signature};
+use crate::{
+    ast::Call, plugin_protocol::Version, Alias, BlockId, Example, PipelineData, ShellError,
+    Signature,
+};
 
 use super::{EngineState, Stack, StateWorkingSet};
 
@@ -97,13 +100,8 @@ pub trait Command: Send + Sync + CommandClone {
     }
 
     // Whether the plugin supports pipelined input, only applicable to plugin commands
-    fn supports_pipelined_input(&self) -> bool {
-        false
-    }
-
-    // Whether the plugin supports multiple inputs, only applicable to plugin commands
-    fn supports_pipe_io(&self) -> bool {
-        false
+    fn plugin_protocol_version(&self) -> Option<Version> {
+        None
     }
 
     // Whether can run in const evaluation in the parser

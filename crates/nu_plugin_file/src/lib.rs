@@ -10,8 +10,7 @@ impl Plugin for FileCmd {
         vec![PluginSignature::build("file")
             .input_output_types(vec![(Type::String, Type::Record(vec![]))])
             .plugin_examples(vec![])
-            .category(Category::Formats)
-            .supports_pipelined_input(true)]
+            .category(Category::Formats)]
     }
 
     fn run(
