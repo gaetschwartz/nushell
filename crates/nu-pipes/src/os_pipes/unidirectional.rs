@@ -1,3 +1,4 @@
+//! Unidirectional pipes
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -31,23 +32,35 @@ impl<T: AsPipeFd<PipeWrite>> std::io::Write for RawPipeWriter<T> {
     }
 }
 
+/// The "read" capability of a pipe.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct PipeRead(std::marker::PhantomData<()>);
+
+/// The "write" capability of a pipe.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct PipeWrite(std::marker::PhantomData<()>);
 
+/// A trait for `PipeFd` types. This is used to implement the `PipeFd` type for both `PipeRead` and `PipeWrite`.
 pub trait PipeFdType: Sized + Copy + 'static {
+    /// The name of the pipe type.
     const NAME: char;
+    /// The type of the pipe.
     const TYPE: PipeFdTypeEnum;
+    /// The other end of the pipe. If this is `PipeRead`, then `Other` is `PipeWrite` and vice versa.
     type Other: PipeFdType;
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+/// Enum representing the type of pipe file descriptor.
 pub enum PipeFdTypeEnum {
+    /// Read end of the pipe.
     Read,
+    /// Write end of the pipe.
     Write,
+    /// Unknown type of pipe.
     Unknown,
 }
+
 impl PipeFdType for PipeRead {
     const NAME: char = 'r';
     const TYPE: PipeFdTypeEnum = PipeFdTypeEnum::Read;

@@ -5,7 +5,7 @@ use std::{
 
 use nu_pipes::{
     unidirectional::{pipe, PipeRead},
-    utils, PipeFd,
+    PipeFd,
 };
 
 trait ReadAsString {
@@ -23,6 +23,18 @@ fn as_string(r: Option<impl Read>) -> String {
     r.map(|mut s| s.read_as_string().unwrap())
         .unwrap_or("None".to_string())
 }
+
+pub(crate) fn named_thread<
+    T: 'static + Send,
+    F: 'static + Send + FnOnce() -> T,
+    S: Into<String>,
+>(
+    name: S,
+    f: F,
+) -> Result<std::thread::JoinHandle<T>, std::io::Error> {
+    std::thread::Builder::new().name(name.into()).spawn(f)
+}
+
 #[test]
 fn pipes_readwrite() {
     let (read, write) = pipe().unwrap();
@@ -87,7 +99,7 @@ fn pipe_read_write_in_thread() {
     // serialize the pipe
     let serialized = serde_json::to_string(&read).unwrap();
     // spawn a new process
-    let (read, buf) = utils::named_thread("thread@pipe_in_another_thread", move || {
+    let (read, buf) = named_thread("thread@pipe_in_another_thread", move || {
         // deserialize the pipe
         let deserialized: PipeFd<PipeRead> = serde_json::from_str(&serialized).unwrap();
         let mut reader = deserialized.into_reader();
@@ -122,7 +134,7 @@ fn pipe_in_another_thread_cancelled() {
     let (read, write) = pipe().unwrap();
 
     let thread: std::thread::JoinHandle<Result<(), std::io::Error>> =
-        utils::named_thread("thread@pipe_in_another_thread_cancelled", move || {
+        named_thread("thread@pipe_in_another_thread_cancelled", move || {
             let mut writer = write.into_writer();
 
             // serialize the pipe

@@ -24,7 +24,6 @@ use crate::{
 use super::{PipeError, PipeImplBase};
 
 pub type NativeFd = windows::Win32::Foundation::HANDLE;
-pub type OSError = windows::core::Error;
 
 pub(crate) type PipeImpl = Win32PipeImpl;
 

@@ -11,10 +11,7 @@ impl std::fmt::Debug for PipeError {
         f.debug_struct("PipeError")
             .field("kind", &self.kind)
             .field("message", &self.message)
-            .field(
-                "code",
-                &self.code.map(|c| format!("{:#x}", c)).unwrap_or_default(),
-            )
+            .field("code", &self.code.as_ref().map(HexDisplay))
             .finish()
     }
 }
@@ -212,5 +209,49 @@ impl From<OSErrorKind> for std::io::ErrorKind {
             OSErrorKind::AddressFamilyNotSupported => std::io::ErrorKind::AddrNotAvailable,
             OSErrorKind::Unknown(_) => std::io::ErrorKind::Other,
         }
+    }
+}
+
+pub trait Hexable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+}
+
+#[repr(transparent)]
+pub struct HexDisplay<'a, T: Hexable + ?Sized>(&'a T);
+
+impl Hexable for [u8] {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: std::fmt::LowerHex> Hexable for T {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:x}", self)
+    }
+}
+
+impl<T: Hexable> std::fmt::Debug for HexDisplay<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<T: Hexable> std::fmt::Display for HexDisplay<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+pub trait ToHexDisplayable: Hexable {
+    fn to_hex(&self) -> HexDisplay<Self>;
+}
+
+impl<T: Hexable + ?Sized> ToHexDisplayable for T {
+    fn to_hex(&self) -> HexDisplay<Self> {
+        HexDisplay(self)
     }
 }

@@ -9,7 +9,7 @@ use crate::{
 
 use super::{IntoPipeFd, OsPipe, PipeError, PipeImplBase};
 
-pub type OSError = std::io::Error;
+/// The type of error returned by pipe operations.
 pub type NativeFd = libc::c_int;
 
 pub(crate) struct PipeImpl {}

@@ -3,12 +3,23 @@ use std::thread;
 
 use nu_protocol::{RawStream, ShellError};
 
-use crate::trace_pipe;
 use crate::unidirectional::PipeWrite;
 use crate::utils::NamedScopedThreadSpawn;
 use crate::PipeFd;
+use crate::{trace_pipe, AsPipeFd};
 
-pub trait StreamSender<'a> {
+/// Trait for writing streams to pipes.
+pub trait StreamWriter<'a>: AsPipeFd<PipeWrite> {
+    /// Sends the stdout stream to an external stream within a scoped thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `scope` - The thread scope.
+    /// * `stdout` - The stdout stream to be sent.
+    ///
+    /// # Returns
+    ///
+    /// Returns a handle to the thread if the input is a pipe and the output is an external stream.
     fn send_stream_scoped<'scope, 'env: 'scope>(
         self,
         scope: &'scope thread::Scope<'scope, 'env>,
@@ -18,7 +29,7 @@ pub trait StreamSender<'a> {
         'a: 'env;
 }
 
-impl<'a> StreamSender<'a> for PipeFd<PipeWrite> {
+impl<'a> StreamWriter<'a> for PipeFd<PipeWrite> {
     /// Starts a new thread that will pipe the stdout stream to the os pipe.
     ///
     /// Returns a handle to the thread if the input is a pipe and the output is an external stream.

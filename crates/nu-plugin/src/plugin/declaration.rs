@@ -10,7 +10,7 @@ use std::thread;
 
 use log::trace;
 use nu_pipes::unidirectional::{pipe, PipeWrite};
-use nu_pipes::{trace_pipe, PipeFd, PipeReader, StreamSender};
+use nu_pipes::{trace_pipe, PipeFd, PipeReader, StreamWriter};
 use nu_protocol::ast::Call;
 use nu_protocol::engine::{Command, EngineState, Stack};
 use nu_protocol::plugin_protocol::Capability;

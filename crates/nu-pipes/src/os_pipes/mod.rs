@@ -14,7 +14,7 @@ use self::{
     sys::NativeFd,
     unidirectional::{PipeFdType, PipeFdTypeEnum, PipeRead, PipeWrite},
 };
-pub use sys::OSError;
+/// The inner type of a pipe file descriptor, i32 on Unix and HANDLE on Windows.
 pub type RawPipeFd = i32;
 
 pub mod io;
@@ -24,6 +24,7 @@ pub mod unidirectional;
 #[cfg_attr(unix, path = "unix.rs")]
 mod sys;
 
+/// The capacity of pipe buffers.
 pub const PIPE_BUFFER_CAPACITY: usize = 1024 * 8;
 
 pub(crate) trait PipeImplBase {
@@ -46,10 +47,12 @@ pub(crate) struct OsPipe {
     write_fd: PipeFd<PipeWrite>,
 }
 
+/// A pipe file descriptor.
 #[repr(transparent)]
 pub struct PipeFd<T: PipeFdType>(pub(crate) NativeFd, pub(crate) PhantomData<T>);
 
 impl<T: PipeFdType> PipeFd<T> {
+    /// Duplicates the current pipe file descriptor making it inheritable.
     pub fn into_inheritable(self) -> Result<PipeFd<T>, PipeError> {
         let dup = sys::PipeImpl::dup(&self)?;
         self.close()?;
@@ -58,18 +61,21 @@ impl<T: PipeFdType> PipeFd<T> {
 }
 
 impl PipeFd<PipeRead> {
+    /// Creates a new `OwningPipeReader` from the given pipe file descriptor.
     pub fn into_reader(self) -> OwningPipeReader {
         OwningPipeReader::new(self)
     }
 }
 
 impl PipeFd<PipeWrite> {
+    /// Creates a new `OwningPipeWriter` from the given pipe file descriptor.
     pub fn into_writer(self) -> OwningPipeWriter {
         OwningPipeWriter::new(self)
     }
 }
 
 impl<T: PipeFdType> PipeFd<T> {
+    /// Duplicates the current pipe file descriptor.
     pub fn try_clone(&self) -> Result<PipeFd<T>, PipeError> {
         sys::PipeImpl::dup(self)
     }
@@ -90,6 +96,7 @@ impl<T: PipeFdType> std::fmt::Debug for PipeFd<T> {
 }
 
 impl<T: PipeFdType> PipeFd<T> {
+    /// Closes the pipe file descriptor.
     pub fn close(self) -> Result<(), CloseOwningError<PipeFd<T>, PipeError>> {
         match sys::PipeImpl::close_pipe(&self) {
             Ok(()) => Ok(()),
@@ -107,6 +114,7 @@ impl<T: PipeFdType> From<PipeFd<T>> for NativeFd {
 trait IntoPipeFd<T: PipeFdType>: AsNativeFd {
     unsafe fn into_pipe_fd(self) -> PipeFd<T>;
 }
+/// A Trait for types that can be converted into a pipe file descriptor.
 pub trait FromRawPipeFd {
     /// Creates a new `PipeFd` from the given raw file descriptor.
     ///
@@ -116,6 +124,8 @@ pub trait FromRawPipeFd {
     /// is a valid pipe file descriptor ( it could be closed already, for example)
     unsafe fn from_raw_pipe_fd(fd: RawPipeFd) -> Self;
 }
+
+/// A Trait for types that can be converted from a NativeFd.
 pub trait FromNativeFd: Sized {
     /// Creates a new `PipeFd` from the given native handle.
     ///
@@ -125,6 +135,8 @@ pub trait FromNativeFd: Sized {
     /// is a valid pipe handle ( it could be closed already, for example)
     unsafe fn from_native_fd(fd: NativeFd) -> Self;
 }
+
+/// A trait for types that can be converted as a raw pipe file descriptor.
 pub trait AsRawPipeFd {
     /// Returns the raw file descriptor of the object.
     ///
@@ -134,6 +146,7 @@ pub trait AsRawPipeFd {
     unsafe fn as_raw_pipe_fd(&self) -> RawPipeFd;
 }
 
+/// A trait for types that can be converted as a native fd.
 pub trait AsNativeFd {
     /// Returns the native handle of the object.
     ///
@@ -187,7 +200,9 @@ impl<T: PipeFdType> AsFd for PipeFd<T> {
     }
 }
 
+/// A trait for types that can be converted as a pipe file descriptor.
 pub trait AsPipeFd<T: PipeFdType> {
+    /// Returns the pipe file descriptor of the object.
     fn as_pipe_fd(&self) -> &PipeFd<T>;
 }
 impl<T: PipeFdType> AsPipeFd<T> for PipeFd<T> {

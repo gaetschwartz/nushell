@@ -1,4 +1,7 @@
-#[macro_export]
+//! Utility functions for the crate
+
+/// Returns the name of the current function
+#[macro_export(local_inner_macros)]
 macro_rules! function {
     () => {{
         fn f() {}
@@ -14,6 +17,7 @@ macro_rules! function {
     }};
 }
 
+/// Returns true if the NU_TRACE_PIPES env var is set to 1 or true
 pub fn trace_pipes_enabled() -> bool {
     match std::option_env!("NU_TRACE_PIPES") {
         Some(s) => konst::const_eq!(s, "1") || konst::const_eq!(s, "true"),
@@ -21,6 +25,7 @@ pub fn trace_pipes_enabled() -> bool {
     }
 }
 
+/// Returns the name of the current executable
 #[macro_export(local_inner_macros)]
 macro_rules! exec_name {
     () => {{
@@ -31,6 +36,7 @@ macro_rules! exec_name {
     }};
 }
 
+/// Prints a log event to stderr if NU_TRACE_PIPES is set to 1 or true
 #[macro_export]
 macro_rules! trace_pipe {
     // use eprintln to print "exec_name | function_name:line_number: a log event"
@@ -50,13 +56,6 @@ macro_rules! trace_pipe {
             lock.write_all(b"\n").unwrap();
         }
     );
-}
-
-pub fn named_thread<T: 'static + Send, F: 'static + Send + FnOnce() -> T, S: Into<String>>(
-    name: S,
-    f: F,
-) -> Result<std::thread::JoinHandle<T>, std::io::Error> {
-    std::thread::Builder::new().name(name.into()).spawn(f)
 }
 
 pub(crate) trait NamedScopedThreadSpawn<'scope, 'env: 'scope> {
@@ -81,12 +80,10 @@ impl<'scope, 'env: 'scope> NamedScopedThreadSpawn<'scope, 'env>
     }
 }
 
-pub fn catch_result<T, E: std::error::Error, F: FnOnce() -> Result<T, E>>(f: F) -> Result<T, E> {
-    f()
-}
-
 #[allow(dead_code)]
 pub(crate) const LIBC_CALL_ERROR: &str = "Failed to call ";
+
+/// Generates the error message for a failed libc call
 #[macro_export(local_inner_macros)]
 macro_rules! libc_call_error {
     ($call:expr) => {
@@ -99,6 +96,7 @@ macro_rules! libc_call_error {
     };
 }
 
+/// Calls a libc function and returns an error if the return value is negative
 #[macro_export]
 macro_rules! libc_call {
     ($call:expr) => {{
