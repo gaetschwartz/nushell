@@ -14,9 +14,9 @@ use crate::protocol::{
 use crate::EncodingType;
 use std::env;
 use std::fmt::Write;
-use std::io::{ErrorKind, Write as WriteTrait};
+use std::io::{Error, ErrorKind, Write as WriteTrait};
 use std::path::Path;
-use std::process::{Command as CommandSys, Stdio};
+use std::process::{exit, Command as CommandSys, Stdio};
 
 use nu_protocol::{CustomValue, PluginSignature, ShellError, Span, Value};
 
@@ -320,6 +320,37 @@ pub trait Plugin {
     ) -> Result<Value, LabeledError>;
 }
 
+#[derive(Debug, Default)]
+struct PluginCli {
+    pipes: Option<PluginPipes>,
+    help: bool,
+}
+
+impl PluginCli {
+    fn parse_args() -> Result<Self, Error> {
+        let mut cli = Self::default();
+        let mut pos = 0;
+        for arg in env::args().skip(1) {
+            match arg.as_str() {
+                "-h" | "--help" => {
+                    cli.help = true;
+                    break;
+                }
+                p if !p.starts_with('-') => {
+                    if pos == 0 {
+                        let pipes = serde_json::from_str(p)
+                            .map_err(|err| Error::new(ErrorKind::Other, err))?;
+                        cli.pipes = Some(pipes);
+                    }
+                    pos += 1;
+                }
+                _ => {}
+            }
+        }
+        Ok(cli)
+    }
+}
+
 /// Function used to implement the communication protocol between
 /// nushell and an external plugin.
 ///
@@ -345,17 +376,24 @@ pub trait Plugin {
 /// The `serve_plugin` function should ensure that it is encoded correctly and sent
 /// to StdOut for nushell to decode and and present its result.
 pub fn serve_plugin(plugin: &mut impl Plugin, codec: impl PluginCodec) {
-    if env::args().any(|arg| (arg == "-h") || (arg == "--help")) {
+    let cli = match PluginCli::parse_args() {
+        Ok(cli) => cli,
+        Err(err) => {
+            eprintln!("Error parsing plugin arguments: {}", err);
+            exit(1);
+        }
+    };
+
+    if cli.help {
         print_help(plugin, codec);
-        std::process::exit(0)
+        exit(0);
     }
 
-    let Some(pipes_ser) = env::args().nth(1) else {
-        eprintln!("Expected nu_pipes as first argument but got nothing. This is likely due to the fact that your Nushell version is too old. Please update to the latest version of Nushell.");
+    let plugin_pipes = cli.pipes.unwrap_or(PluginPipes {
+        stdin: PipeFd::stdin(),
+        stdout: PipeFd::stdout(),
+    });
 
-        std::process::exit(1)
-    };
-    let plugin_pipes: PluginPipes = serde_json::from_str(&pipes_ser).unwrap();
     let mut stdout_writer = PipeWriter::new(&plugin_pipes.stdout);
     let mut stdin_reader = PipeReader::new(&plugin_pipes.stdin);
 
@@ -433,13 +471,7 @@ pub fn serve_plugin(plugin: &mut impl Plugin, codec: impl PluginCodec) {
                                 Value::CustomValue { val, .. } => match bincode::serialize(&val) {
                                     Ok(data) => {
                                         let name = val.value_string();
-                                        PluginResponse::PluginData(
-                                            name,
-                                            PluginData {
-                                                data,
-                                                span,
-                                            },
-                                        )
+                                        PluginResponse::PluginData(name, PluginData { data, span })
                                     }
                                     Err(err) => PluginResponse::Error(
                                         ShellError::PluginFailedToEncode {

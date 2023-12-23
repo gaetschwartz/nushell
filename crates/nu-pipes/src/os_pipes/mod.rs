@@ -65,12 +65,27 @@ impl PipeFd<PipeRead> {
     pub fn into_reader(self) -> OwningPipeReader {
         OwningPipeReader::new(self)
     }
+
+    /// The pipe fd of stdin.
+    pub fn stdin() -> PipeFd<PipeRead> {
+        unsafe { PipeFd::from_raw_pipe_fd(0) }
+    }
 }
 
 impl PipeFd<PipeWrite> {
     /// Creates a new `OwningPipeWriter` from the given pipe file descriptor.
     pub fn into_writer(self) -> OwningPipeWriter {
         OwningPipeWriter::new(self)
+    }
+
+    /// The pipe fd of stdout.
+    pub fn stdout() -> PipeFd<PipeWrite> {
+        unsafe { PipeFd::from_raw_pipe_fd(1) }
+    }
+
+    /// The pipe fd of stderr.
+    pub fn stderr() -> PipeFd<PipeWrite> {
+        unsafe { PipeFd::from_raw_pipe_fd(2) }
     }
 }
 
