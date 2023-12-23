@@ -287,7 +287,7 @@ pub fn get_signature(
 ///         &mut self,
 ///         name: &str,
 ///         call: &EvaluatedCall,
-///         input: &Value,
+///         input: PluginPipelineData,
 ///     ) -> Result<Value, LabeledError> {
 ///         Ok(Value::string("Hello, World!".to_owned(), call.head))
 ///     }
@@ -433,7 +433,13 @@ pub fn serve_plugin(plugin: &mut impl Plugin, codec: impl PluginCodec) {
                                 Value::CustomValue { val, .. } => match bincode::serialize(&val) {
                                     Ok(data) => {
                                         let name = val.value_string();
-                                        PluginResponse::PluginData(name, PluginData { data, span })
+                                        PluginResponse::PluginData(
+                                            name,
+                                            PluginData {
+                                                data,
+                                                span,
+                                            },
+                                        )
                                     }
                                     Err(err) => PluginResponse::Error(
                                         ShellError::PluginFailedToEncode {

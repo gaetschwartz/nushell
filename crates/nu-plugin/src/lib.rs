@@ -29,7 +29,7 @@
 //!         &mut self,
 //!         name: &str,
 //!         call: &EvaluatedCall,
-//!         input: &Value
+//!         input: PluginPipelineData,
 //!     ) -> Result<Value, LabeledError> {
 //!         todo!();
 //!     }

@@ -230,9 +230,7 @@ impl Command for PluginDeclaration {
             trace_pipe!("Got response from plugin");
 
             let pipeline_data = match response {
-                Ok(PluginResponse::Value(value)) => {
-                    Ok(PipelineData::Value(value.as_ref().clone(), None))
-                }
+                Ok(PluginResponse::Value(value)) => Ok(PipelineData::Value(*value, None)),
                 Ok(PluginResponse::PluginData(name, plugin_data)) => Ok(PipelineData::Value(
                     Value::custom_value(
                         Box::new(PluginCustomValue {
