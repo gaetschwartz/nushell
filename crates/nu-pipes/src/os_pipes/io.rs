@@ -45,11 +45,11 @@ impl<'a> PipeWriter<'a> {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use nu_pipes::os_pipes::io::PipeWriter;
-    /// use nu_pipes::os_pipes::PipeFd;
+    /// ```no_run
+    /// use nu_pipes::io::PipeWriter;
+    /// use nu_pipes::{PipeFd, FromRawPipeFd};
     ///
-    /// let pipe_fd = PipeFd::new();
+    /// let pipe_fd = unsafe { PipeFd::from_raw_pipe_fd(0) };
     /// let writer = PipeWriter::new(&pipe_fd);
     /// ```
     pub fn new<'b: 'a>(fd: &'b PipeFd<PipeWrite>) -> Self {
@@ -85,11 +85,11 @@ impl<'a> PipeReader<'a> {
     ///
     /// # Example
     ///
-    /// ```
-    /// use nu_pipes::os_pipes::io::PipeReader;
-    /// use nu_pipes::os_pipes::PipeFd;
+    /// ```no_run
+    /// use nu_pipes::io::PipeReader;
+    /// use nu_pipes::{PipeFd, FromRawPipeFd};
     ///
-    /// let pipe_fd = PipeFd::new(0);
+    /// let pipe_fd = unsafe { PipeFd::from_raw_pipe_fd(0) };
     /// let reader = PipeReader::new(&pipe_fd);
     /// ```
     pub fn new<'b: 'a>(fd: &'b PipeFd<PipeRead>) -> Self {
@@ -285,9 +285,9 @@ impl std::io::Write for OwningPipeWriter {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use std::io::Error;
-/// use nu_pipes::os_pipes::io::CloseOwningError;
+/// use nu_pipes::io::CloseOwningError;
 ///
 /// let error = Error::new(std::io::ErrorKind::Other, "Failed to close pipe");
 /// let resource = 42;
@@ -385,10 +385,12 @@ impl<'a> PipeReader<'a> {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use nu_pipes::os_pipes::io::{PipeReader, PipeIterator};
+    /// ```no_run
+    /// use nu_pipes::io::{PipeReader, PipeIterator};
+    /// use nu_pipes::{PipeFd, FromRawPipeFd};
     ///
-    /// let mut reader = PipeReader::new();
+    /// let pipe_fd = unsafe { PipeFd::from_raw_pipe_fd(0) };
+    /// let mut reader = PipeReader::new(&pipe_fd);
     /// let mut iterator = reader.stream();
     ///
     /// // Read data from the pipe using the iterator
@@ -413,10 +415,11 @@ impl OwningPipeReader {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use nu_pipes::os_pipes::OwningPipeReader;
+    /// ```no_run
+    /// use nu_pipes::{PipeFd, io::OwningPipeReader, FromRawPipeFd};
     ///
-    /// let mut reader = OwningPipeReader::new();
+    /// let mut fd = unsafe { PipeFd::from_raw_pipe_fd(0) };
+    /// let mut reader = OwningPipeReader::new(fd);
     /// let mut stream = reader.stream();
     ///
     /// // Read data from the pipe in a streaming fashion
