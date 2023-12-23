@@ -20,6 +20,9 @@ pub trait CustomValue: fmt::Debug + Send + Sync {
     // Any representation used to downcast object to its original type
     fn as_any(&self) -> &dyn std::any::Any;
 
+    // Any representation used to downcast object to its original type (mutable)
+    fn as_mut_any(&mut self) -> &mut dyn std::any::Any;
+
     // Follow cell path functions
     fn follow_path_int(&self, _count: usize, span: Span) -> Result<Value, ShellError> {
         Err(ShellError::IncompatiblePathAccess {

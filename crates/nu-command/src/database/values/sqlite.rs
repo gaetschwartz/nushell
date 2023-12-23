@@ -372,6 +372,10 @@ impl CustomValue for SQLiteDatabase {
         self
     }
 
+    fn as_mut_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn follow_path_int(&self, _count: usize, span: Span) -> Result<Value, ShellError> {
         // In theory we could support this, but tables don't have an especially well-defined order
         Err(ShellError::IncompatiblePathAccess { type_name: "SQLite databases do not support integer-indexed access. Try specifying a table name instead".into(), span })

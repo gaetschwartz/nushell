@@ -34,6 +34,10 @@ impl CustomValue for NuDataFrame {
         self
     }
 
+    fn as_mut_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn follow_path_int(&self, count: usize, span: Span) -> Result<Value, ShellError> {
         self.get_value(count, span)
     }

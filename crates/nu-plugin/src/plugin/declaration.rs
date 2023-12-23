@@ -69,14 +69,14 @@ impl PluginDeclaration {
             }
         }
 
-        let value = input.into_value(call.head);
+        let mut value = input.into_value(call.head);
         let span = value.span();
         let input = match value {
-            Value::CustomValue { val, .. } => {
-                match val.as_any().downcast_ref::<PluginCustomValue>() {
+            Value::CustomValue { ref mut val, .. } => {
+                match val.as_mut_any().downcast_mut::<PluginCustomValue>() {
                     Some(plugin) if plugin.filename == self.filename => {
                         CallInput::Data(PluginData {
-                            data: plugin.data.clone(),
+                            data: std::mem::take(&mut plugin.data),
                             span,
                         })
                     }

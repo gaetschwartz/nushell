@@ -35,6 +35,10 @@ impl CustomValue for NuExpression {
         self
     }
 
+    fn as_mut_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn operation(
         &self,
         lhs_span: Span,

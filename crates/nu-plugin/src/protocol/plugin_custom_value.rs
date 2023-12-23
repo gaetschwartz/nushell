@@ -117,6 +117,10 @@ impl CustomValue for PluginCustomValue {
         self
     }
 
+    fn as_mut_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn typetag_name(&self) -> &'static str {
         "PluginCustomValue"
     }
