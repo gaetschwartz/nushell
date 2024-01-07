@@ -1808,6 +1808,15 @@ dependencies = [
 
 [[package]]
 name = "ical"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "356d82bd58997815d55ea6f9081bd4cac149e50ca943f7a4f7c050fec7271c1f"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "ical"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26393c372d4c4d51616084afe36c0b44e4467febaa6f91f11f789094b4863bf9"
@@ -3043,7 +3052,7 @@ dependencies = [
 
 [[package]]
 name = "nu-plugin"
-version = "0.88.0"
+version = "0.88.2"
 dependencies = [
  "bincode",
  "log",
@@ -3187,7 +3196,7 @@ name = "nu_plugin_file"
 version = "0.88.0"
 dependencies = [
  "eml-parser",
- "ical",
+ "ical 0.8.0",
  "indexmap",
  "nu-plugin",
  "nu-protocol",
@@ -3199,7 +3208,7 @@ name = "nu_plugin_formats"
 version = "0.88.2"
 dependencies = [
  "eml-parser",
- "ical",
+ "ical 0.9.0",
  "indexmap",
  "nu-plugin",
  "nu-protocol",
@@ -4456,7 +4465,8 @@ dependencies = [
 [[package]]
 name = "reedline"
 version = "0.27.1"
-source = "git+https://github.com/nushell/reedline.git?branch=main#e097b88dab538705c7b165cf3a1f5cf3a74a23bb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07046f804ccb26a6fa8b638f505ccd2a8b7702399a89b9640a0d40ecda49233d"
 dependencies = [
  "chrono",
  "crossterm",
@@ -6211,16 +6221,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e745dab35a0c4c77aa3ce42d595e13d2003d6902d6b08c9ef5fc326d08da12b"
 dependencies = [
  "windows-targets 0.42.2",
-]
-
-[[package]]
-name = "windows"
-version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
-dependencies = [
- "windows-core 0.52.0",
- "windows-targets 0.52.0",
 ]
 
 [[package]]

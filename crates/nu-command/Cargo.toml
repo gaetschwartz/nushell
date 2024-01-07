@@ -58,7 +58,7 @@ indexmap = "2.1"
 indicatif = "0.17"
 itertools = "0.12"
 log = "0.4"
-lscolors = { version = "0.15", default-features = false, features = [
+lscolors = { version = "0.16", default-features = false, features = [
 	"nu-ansi-term",
 ] }
 md5 = { package = "md-5", version = "0.10" }
@@ -120,7 +120,10 @@ winreg = "0.52"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 umask = "2.1"
-nix = { version = "0.27", default-features = false, features = ["user", "resource"] }
+nix = { version = "0.27", default-features = false, features = [
+	"user",
+	"resource",
+] }
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 procfs = "0.16.0"

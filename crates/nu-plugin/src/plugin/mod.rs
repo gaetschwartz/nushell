@@ -359,12 +359,12 @@ impl PluginCli {
 ///
 /// ```
 /// # use nu_plugin::*;
-/// # use nu_protocol::{PluginSignature, Value};
+/// # use nu_protocol::{PluginSignature, Value, PluginPipelineData};
 /// # struct MyPlugin;
 /// # impl MyPlugin { fn new() -> Self { Self }}
 /// # impl Plugin for MyPlugin {
 /// #     fn signature(&self) -> Vec<PluginSignature> {todo!();}
-/// #     fn run(&mut self, name: &str, call: &EvaluatedCall, input: &Value)
+/// #     fn run(&mut self, name: &str, call: &EvaluatedCall, input: PluginPipelineData)
 /// #         -> Result<Value, LabeledError> {todo!();}
 /// # }
 /// fn main() {

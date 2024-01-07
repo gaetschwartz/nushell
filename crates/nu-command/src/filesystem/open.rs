@@ -1,4 +1,5 @@
 use nu_engine::{current_dir, eval_block, CallExt};
+use nu_path::expand_to_real_path;
 use nu_pipes::PIPE_BUFFER_CAPACITY;
 use nu_protocol::ast::Call;
 use nu_protocol::engine::{Command, EngineState, Stack};
@@ -158,6 +159,7 @@ impl Command for Open {
                     };
 
                     let buf_reader = BufReader::with_capacity(PIPE_BUFFER_CAPACITY, file);
+                    let real_path = expand_to_real_path(path);
 
                     let file_contents = PipelineData::ExternalStream {
                         stdout: Some(RawStream::new(
