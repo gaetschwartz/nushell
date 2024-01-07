@@ -96,6 +96,31 @@ pub fn meowb() {
     }
 }
 
+/// Cross platform pipe reader (open a file, print the contents) using read_to_string and println!()
+pub fn mario() {
+    use nu_pipes::{unidirectional::PipeRead, PipeFd};
+
+    let args = args();
+    let json_read = args
+        .get(1)
+        .expect("Expected json encoded PipeFd<PipeRead> as first argument");
+    let read: PipeFd<PipeRead> = serde_json::from_str(&json_read).unwrap();
+    let mut reader = read.into_reader();
+
+    let mut buf = Vec::new();
+    loop {
+        let mut chunk = [0u8; 256];
+        let read = reader.read(&mut chunk).unwrap();
+        if read == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..read]);
+    }
+    reader.close().unwrap();
+
+    println!("{}", std::str::from_utf8(&buf).unwrap());
+}
+
 // Relays anything received on stdin to stdout
 pub fn relay() {
     io::copy(&mut io::stdin().lock(), &mut io::stdout().lock())

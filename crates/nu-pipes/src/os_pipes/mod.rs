@@ -316,6 +316,7 @@ impl<T: PipeFdType> Eq for PipeFd<T> {}
 
 #[cfg(test)]
 mod tests {
+    use nu_test_support::fs;
     use serial_test::serial;
 
     use crate::{
@@ -325,7 +326,7 @@ mod tests {
 
     use std::{
         io::{Read, Write},
-        process::Command,
+        process::{Command, Stdio},
     };
 
     #[test]
@@ -529,19 +530,6 @@ mod tests {
     #[serial(nu_pipes)]
 
     fn test_pipe_in_another_process() {
-        println!("Compiling pipe_echoer...");
-        const BINARY_NAME: &str = "pipe_echoer";
-
-        Command::new("cargo")
-            .arg("build")
-            .arg("-q")
-            .arg("--bin")
-            .arg(BINARY_NAME)
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap();
-
         let (read, write) = pipe().unwrap();
         println!("read: {:?}", read);
         println!("write: {:?}", write);
@@ -551,16 +539,12 @@ mod tests {
         let json = serde_json::to_string(&read_dup).unwrap();
         read.close().unwrap();
 
-        println!("Running pipe_echoer...");
-
         // spawn a new process
-        let mut res = Command::new("cargo")
-            .arg("run")
-            .arg("--quiet")
-            .arg("--bin")
-            .arg(BINARY_NAME)
+        let mut res = Command::new(fs::executable_path())
+            .arg("--testbin")
+            .arg("mario")
             .arg(json)
-            .stdout(std::process::Stdio::piped())
+            .stdout(Stdio::piped())
             .spawn()
             .unwrap();
 
@@ -571,7 +555,7 @@ mod tests {
         writer.flush().unwrap();
         writer.close().unwrap();
 
-        println!("Waiting for pipe_echoer to finish...");
+        println!("Waiting for mario to read pipe...");
 
         let code = res.wait().unwrap();
         // read_dup.close().unwrap();

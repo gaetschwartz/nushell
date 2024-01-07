@@ -268,6 +268,7 @@ fn main() -> Result<()> {
             "cococo" => test_bins::cococo(),
             "meow" => test_bins::meow(),
             "meowb" => test_bins::meowb(),
+            "mario" => test_bins::mario(),
             "relay" => test_bins::relay(),
             "iecho" => test_bins::iecho(),
             "fail" => test_bins::fail(),
