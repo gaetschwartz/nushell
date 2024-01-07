@@ -13,7 +13,7 @@ use nu_pipes::unidirectional::{pipe, PipeWrite};
 use nu_pipes::{trace_pipe, PipeFd, PipeReader, StreamWriter};
 use nu_protocol::ast::Call;
 use nu_protocol::engine::{Command, EngineState, Stack};
-use nu_protocol::plugin_protocol::Capability;
+use nu_protocol::plugin_protocol::{PluginCapability, SupportsCapability};
 use nu_protocol::{
     Example, PipelineData, PluginSignature, RawStream, ShellError, Signature, Value,
 };
@@ -42,7 +42,7 @@ impl PluginDeclaration {
         mut input: PipelineData,
         call: &Call,
     ) -> Result<CallInputWithOptPipe, ShellError> {
-        if self.signature.protocol_version.supports(Capability::Pipes) {
+        if self.signature.supports(PluginCapability::Pipes) {
             if let PipelineData::ExternalStream {
                 stdout: ref mut stdout @ Some(_),
                 ..
@@ -141,7 +141,7 @@ impl Command for PluginDeclaration {
     }
 
     fn plugin_protocol_version(&self) -> Option<nu_protocol::plugin_protocol::Version> {
-        Some(self.signature.protocol_version)
+        Some(self.signature.get_protocol_version())
     }
 
     fn run(
@@ -157,13 +157,12 @@ impl Command for PluginDeclaration {
         trace_pipe!(
             "Plugin supports pipes: {}",
             self.signature
-                .protocol_version
-                .supports(nu_protocol::plugin_protocol::Capability::Pipes)
+                .supports(nu_protocol::plugin_protocol::PluginCapability::Pipes)
         );
         let mut plugin_cmd = create_command(
             &self.filename,
             self.shell.as_deref(),
-            self.signature.protocol_version,
+            self.signature.get_protocol_version(),
         );
         trace_pipe!(
             "Created command for plugin: `{} {}`",
@@ -181,6 +180,13 @@ impl Command for PluginDeclaration {
         plugin_cmd.command.envs(current_envs);
 
         let (call_input, pipe, stream) = self.make_call_input(input, call)?.spread_pipe();
+
+        assert!(
+            !matches!(call_input, CallInput::Pipe(_, _))
+                || self.signature.supports(PluginCapability::Pipes),
+            "Plugin {} does not support pipes, but was given a pipe, this is a bug in Nushell",
+            self.name
+        );
 
         let mut child = plugin_cmd.command.spawn().map_err(|err| {
             let decl = engine_state.get_decl(call.decl_id);
@@ -239,7 +245,7 @@ impl Command for PluginDeclaration {
                             filename: self.filename.clone(),
                             shell: self.shell.clone(),
                             source: engine_state.get_decl(call.decl_id).name().to_owned(),
-                            protocol_version: self.signature.protocol_version,
+                            protocol_version: self.signature.get_protocol_version(),
                         }),
                         plugin_data.span,
                     ),

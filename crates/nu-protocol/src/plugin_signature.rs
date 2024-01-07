@@ -12,8 +12,9 @@ use self::plugin_protocol::Version;
 pub struct PluginSignature {
     pub sig: Signature,
     pub examples: Vec<PluginExample>,
-    #[serde(default = "plugin_protocol::Version::none")]
-    pub protocol_version: Version,
+    // By default plugins are assumed to use the v1 protocol if they don't specify
+    #[serde(default = "plugin_protocol::Version::v1")]
+    protocol_version: Version,
 }
 
 impl PluginSignature {
@@ -243,7 +244,10 @@ impl PluginSignature {
 }
 
 pub mod plugin_protocol {
+
     use serde::{Deserialize, Serialize};
+
+    use crate::PluginSignature;
 
     #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, PartialOrd, Ord)]
     #[repr(u8)]
@@ -252,25 +256,38 @@ pub mod plugin_protocol {
         V2 = 2,
     }
 
+    pub trait SupportsCapability {
+        fn supported(&self) -> Vec<PluginCapability>;
+        fn supports(&self, capability: PluginCapability) -> bool {
+            self.supported().contains(&capability)
+        }
+    }
+
     impl Version {
         pub const CURRENT: Version = Version::V2;
 
-        pub(crate) fn none() -> Version {
+        pub(crate) fn v1() -> Version {
             Version::V1
         }
+    }
 
-        pub fn supports(&self, capability: Capability) -> bool {
+    impl SupportsCapability for Version {
+        fn supported(&self) -> Vec<PluginCapability> {
             match self {
-                Version::V1 => false,
-                Version::V2 => match capability {
-                    Capability::Pipes => true,
-                },
+                Version::V1 => vec![],
+                Version::V2 => vec![PluginCapability::Pipes],
             }
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq)]
-    pub enum Capability {
+    impl SupportsCapability for PluginSignature {
+        fn supported(&self) -> Vec<PluginCapability> {
+            self.protocol_version.supported()
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PluginCapability {
         /// The plugin can accept pipelined input
         Pipes,
     }

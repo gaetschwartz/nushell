@@ -316,6 +316,8 @@ impl<T: PipeFdType> Eq for PipeFd<T> {}
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use crate::{
         unidirectional::{pipe, PipeRead, PipeWrite},
         FromRawPipeFd, PipeFd,
@@ -377,7 +379,13 @@ mod tests {
         std::thread::Builder::new().name(name.into()).spawn(f)
     }
 
+    // This test among others are ran in serial to ensure that the pipe file descriptors
+    // are not reused between tests. This is because the pipe file descriptors are
+    // global and we don't want to close a pipe file descriptor that is still in use
+    // by another test.
+    // We use the `serial_test` crate to ensure that the tests are ran in serial.
     #[test]
+    #[serial(nu_pipes)]
     fn pipes_readwrite() {
         let (read, write) = pipe().unwrap();
         let mut reader = read.into_reader();
@@ -398,6 +406,8 @@ mod tests {
     }
 
     #[test]
+    #[serial(nu_pipes)]
+
     fn pipes_with_closed_read_end_cant_write() {
         let (read, write) = pipe().unwrap();
         let mut reader = read.into_reader();
@@ -429,6 +439,8 @@ mod tests {
     }
 
     #[test]
+    #[serial(nu_pipes)]
+
     fn pipe_read_write_in_thread() {
         let (read, write) = pipe().unwrap();
         let mut writer = write.into_writer();
@@ -472,6 +484,8 @@ mod tests {
     impl<R: Read> ReadExact for R {}
 
     #[test]
+    #[serial(nu_pipes)]
+
     fn pipe_in_another_thread_cancelled() {
         let (read, write) = pipe().unwrap();
 
@@ -512,6 +526,8 @@ mod tests {
     }
 
     #[test]
+    #[serial(nu_pipes)]
+
     fn test_pipe_in_another_process() {
         println!("Compiling pipe_echoer...");
         const BINARY_NAME: &str = "pipe_echoer";

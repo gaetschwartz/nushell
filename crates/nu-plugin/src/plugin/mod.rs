@@ -3,7 +3,7 @@ pub use declaration::PluginDeclaration;
 use nu_engine::documentation::get_flags_section;
 use nu_pipes::unidirectional::{PipeRead, PipeWrite};
 use nu_pipes::{trace_pipe, PipeFd, PipeReader, PipeWriter};
-use nu_protocol::plugin_protocol::{self};
+use nu_protocol::plugin_protocol::{self, PluginCapability, SupportsCapability};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -113,7 +113,7 @@ pub(crate) fn create_command(
         (None, None) => CommandBuilder::new(path).arg(&pipes_ser).build(),
     };
 
-    if protocol_version.supports(plugin_protocol::Capability::Pipes) {
+    if !protocol_version.supports(PluginCapability::Pipes) {
         process
             .stdin(plugin_pipes.stdin)
             .stdout(plugin_pipes.stdout);

@@ -48,6 +48,7 @@ members = [
 	"crates/nu_plugin_custom_values",
 	"crates/nu_plugin_file",
 	"crates/nu_plugin_formats",
+	"crates/nu_plugin_formats_v1",
 	"crates/nu-std",
 	"crates/nu-table",
 	"crates/nu-term-grid",

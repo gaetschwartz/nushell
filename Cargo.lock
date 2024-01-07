@@ -1260,6 +1260,16 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fancy-regex"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b95f7c0680e4142284cf8b22c14a476e87d61b004a3a0861872b32ef7ead40a2"
+dependencies = [
+ "bit-set",
+ "regex",
+]
+
+[[package]]
+name = "fancy-regex"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7493d4c459da9f84325ad297371a6b2b8a162800873a22e3b6b6512e61d18c05"
@@ -2314,6 +2324,15 @@ dependencies = [
 
 [[package]]
 name = "lscolors"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf7015a04103ad78abb77e4b79ed151e767922d1cfde5f62640471c629a2320d"
+dependencies = [
+ "nu-ansi-term",
+]
+
+[[package]]
+name = "lscolors"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab0b209ec3976527806024406fe765474b9a1750a0ed4b8f0372364741f50e7b"
@@ -2675,27 +2694,27 @@ dependencies = [
  "nu-cmd-lang",
  "nu-color-config",
  "nu-command",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-explore",
  "nu-json",
  "nu-lsp",
  "nu-parser",
- "nu-path",
- "nu-plugin",
+ "nu-path 0.88.2",
+ "nu-plugin 0.88.2",
  "nu-pretty-hex",
- "nu-protocol",
+ "nu-protocol 0.88.2",
  "nu-std",
- "nu-system",
+ "nu-system 0.88.2",
  "nu-table",
  "nu-term-grid",
  "nu-test-support",
- "nu-utils",
+ "nu-utils 0.88.2",
  "openssl",
  "pretty_assertions",
  "reedline",
  "rstest",
  "serde_json",
- "serial_test",
+ "serial_test 2.0.0",
  "signal-hook",
  "simplelog",
  "tempfile",
@@ -2718,7 +2737,7 @@ version = "0.88.2"
 dependencies = [
  "chrono",
  "crossterm",
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "fuzzy-matcher",
  "is_executable",
  "log",
@@ -2728,12 +2747,12 @@ dependencies = [
  "nu-cmd-lang",
  "nu-color-config",
  "nu-command",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-parser",
- "nu-path",
- "nu-protocol",
+ "nu-path 0.88.2",
+ "nu-protocol 0.88.2",
  "nu-test-support",
- "nu-utils",
+ "nu-utils 0.88.2",
  "once_cell",
  "pathdiff",
  "percent-encoding",
@@ -2751,13 +2770,13 @@ version = "0.88.2"
 dependencies = [
  "indexmap",
  "miette",
- "nu-engine",
- "nu-glob",
+ "nu-engine 0.88.2",
+ "nu-glob 0.88.2",
  "nu-parser",
- "nu-path",
- "nu-protocol",
+ "nu-path 0.88.2",
+ "nu-protocol 0.88.2",
  "nu-test-support",
- "nu-utils",
+ "nu-utils 0.88.2",
  "rstest",
 ]
 
@@ -2767,12 +2786,12 @@ version = "0.88.2"
 dependencies = [
  "chrono",
  "chrono-tz",
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "indexmap",
  "nu-cmd-lang",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-parser",
- "nu-protocol",
+ "nu-protocol 0.88.2",
  "nu-test-support",
  "num 0.4.1",
  "polars",
@@ -2789,20 +2808,20 @@ name = "nu-cmd-extra"
 version = "0.88.2"
 dependencies = [
  "ahash",
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "heck",
  "htmlescape",
  "nu-ansi-term",
  "nu-cmd-base",
  "nu-cmd-lang",
  "nu-command",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-json",
  "nu-parser",
  "nu-pretty-hex",
- "nu-protocol",
+ "nu-protocol 0.88.2",
  "nu-test-support",
- "nu-utils",
+ "nu-utils 0.88.2",
  "num-traits",
  "rust-embed",
  "serde",
@@ -2813,13 +2832,13 @@ dependencies = [
 name = "nu-cmd-lang"
 version = "0.88.2"
 dependencies = [
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "itertools 0.12.0",
  "nu-ansi-term",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-parser",
- "nu-protocol",
- "nu-utils",
+ "nu-protocol 0.88.2",
+ "nu-utils 0.88.2",
  "shadow-rs",
 ]
 
@@ -2828,11 +2847,11 @@ name = "nu-color-config"
 version = "0.88.2"
 dependencies = [
  "nu-ansi-term",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-json",
- "nu-protocol",
+ "nu-protocol 0.88.2",
  "nu-test-support",
- "nu-utils",
+ "nu-utils 0.88.2",
  "serde",
 ]
 
@@ -2857,7 +2876,7 @@ dependencies = [
  "dirs-next",
  "dtparse",
  "encoding_rs",
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "filesize",
  "filetime",
  "fs_extra",
@@ -2868,7 +2887,7 @@ dependencies = [
  "itertools 0.12.0",
  "libc",
  "log",
- "lscolors",
+ "lscolors 0.16.0",
  "md-5",
  "miette",
  "mime",
@@ -2881,19 +2900,19 @@ dependencies = [
  "nu-cmd-base",
  "nu-cmd-lang",
  "nu-color-config",
- "nu-engine",
- "nu-glob",
+ "nu-engine 0.88.2",
+ "nu-glob 0.88.2",
  "nu-json",
  "nu-parser",
- "nu-path",
+ "nu-path 0.88.2",
  "nu-pipes",
  "nu-pretty-hex",
- "nu-protocol",
- "nu-system",
+ "nu-protocol 0.88.2",
+ "nu-system 0.88.2",
  "nu-table",
  "nu-term-grid",
  "nu-test-support",
- "nu-utils",
+ "nu-utils 0.88.2",
  "num 0.4.1",
  "num-format",
  "num-traits",
@@ -2942,12 +2961,24 @@ dependencies = [
 
 [[package]]
 name = "nu-engine"
+version = "0.88.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31549205c091d89cb1bad9e97a5944b998f9417a718c0ad5d1ca373abe27c8b"
+dependencies = [
+ "nu-glob 0.88.1",
+ "nu-path 0.88.1",
+ "nu-protocol 0.88.1",
+ "nu-utils 0.88.1",
+]
+
+[[package]]
+name = "nu-engine"
 version = "0.88.2"
 dependencies = [
- "nu-glob",
- "nu-path",
- "nu-protocol",
- "nu-utils",
+ "nu-glob 0.88.2",
+ "nu-path 0.88.2",
+ "nu-protocol 0.88.2",
+ "nu-utils 0.88.2",
 ]
 
 [[package]]
@@ -2956,20 +2987,26 @@ version = "0.88.2"
 dependencies = [
  "ansi-str",
  "crossterm",
- "lscolors",
+ "lscolors 0.16.0",
  "nu-ansi-term",
  "nu-color-config",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-json",
  "nu-parser",
- "nu-protocol",
+ "nu-protocol 0.88.2",
  "nu-table",
- "nu-utils",
+ "nu-utils 0.88.2",
  "ratatui",
  "strip-ansi-escapes",
  "terminal_size 0.2.6",
  "unicode-width",
 ]
+
+[[package]]
+name = "nu-glob"
+version = "0.88.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fc6e216ee3e0d3574085e3f9bc63b382d078b159b2f2f1380a6f4d08c1662fd"
 
 [[package]]
 name = "nu-glob"
@@ -3000,7 +3037,7 @@ dependencies = [
  "nu-cmd-lang",
  "nu-command",
  "nu-parser",
- "nu-protocol",
+ "nu-protocol 0.88.2",
  "nu-test-support",
  "reedline",
  "ropey",
@@ -3017,12 +3054,23 @@ dependencies = [
  "chrono",
  "itertools 0.12.0",
  "log",
- "nu-engine",
- "nu-path",
- "nu-plugin",
- "nu-protocol",
+ "nu-engine 0.88.2",
+ "nu-path 0.88.2",
+ "nu-plugin 0.88.2",
+ "nu-protocol 0.88.2",
  "rstest",
  "serde_json",
+]
+
+[[package]]
+name = "nu-path"
+version = "0.88.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b89b96e3df2637c95dfb893ba0a97646d1733d6957e31ba3e6f46bee09cdea29"
+dependencies = [
+ "dirs-next",
+ "omnipath",
+ "pwd",
 ]
 
 [[package]]
@@ -3042,12 +3090,27 @@ dependencies = [
  "konst",
  "libc",
  "log",
- "nu-engine",
- "nu-protocol",
+ "nu-engine 0.88.2",
+ "nu-protocol 0.88.2",
  "num_cpus",
  "serde",
  "serde_json",
+ "serial_test 3.0.0",
  "windows 0.52.0",
+]
+
+[[package]]
+name = "nu-plugin"
+version = "0.88.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b27df1024c58a62d2108ed3a430276a22495a357458b40769d9f45e3a7a88250"
+dependencies = [
+ "bincode",
+ "nu-engine 0.88.1",
+ "nu-protocol 0.88.1",
+ "rmp-serde",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3056,9 +3119,9 @@ version = "0.88.2"
 dependencies = [
  "bincode",
  "log",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-pipes",
- "nu-protocol",
+ "nu-protocol 0.88.2",
  "rmp-serde",
  "serde",
  "serde_json",
@@ -3075,19 +3138,42 @@ dependencies = [
 
 [[package]]
 name = "nu-protocol"
+version = "0.88.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "243a5a60997b63173dd2e0fdd5c1a6d2c25e0782e444c23714fedeef3ac95949"
+dependencies = [
+ "byte-unit",
+ "chrono",
+ "chrono-humanize",
+ "fancy-regex 0.11.0",
+ "indexmap",
+ "lru",
+ "miette",
+ "nu-path 0.88.1",
+ "nu-system 0.88.1",
+ "nu-utils 0.88.1",
+ "num-format",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "typetag",
+]
+
+[[package]]
+name = "nu-protocol"
 version = "0.88.2"
 dependencies = [
  "byte-unit",
  "chrono",
  "chrono-humanize",
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "indexmap",
  "lru",
  "miette",
- "nu-path",
- "nu-system",
+ "nu-path 0.88.2",
+ "nu-system 0.88.2",
  "nu-test-support",
- "nu-utils",
+ "nu-utils 0.88.2",
  "num-format",
  "rstest",
  "serde",
@@ -3103,9 +3189,28 @@ name = "nu-std"
 version = "0.88.2"
 dependencies = [
  "miette",
- "nu-engine",
+ "nu-engine 0.88.2",
  "nu-parser",
- "nu-protocol",
+ "nu-protocol 0.88.2",
+]
+
+[[package]]
+name = "nu-system"
+version = "0.88.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8e2cd7ed9a6567b2794de6c82ce7cfa9661895d172190bdfde06d033e56cad0"
+dependencies = [
+ "chrono",
+ "libc",
+ "libproc",
+ "log",
+ "mach2",
+ "nix",
+ "ntapi",
+ "once_cell",
+ "procfs",
+ "sysinfo",
+ "winapi",
 ]
 
 [[package]]
@@ -3129,12 +3234,12 @@ dependencies = [
 name = "nu-table"
 version = "0.88.2"
 dependencies = [
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "nu-ansi-term",
  "nu-color-config",
- "nu-engine",
- "nu-protocol",
- "nu-utils",
+ "nu-engine 0.88.2",
+ "nu-protocol 0.88.2",
+ "nu-utils 0.88.2",
  "once_cell",
  "tabled",
 ]
@@ -3143,7 +3248,7 @@ dependencies = [
 name = "nu-term-grid"
 version = "0.88.2"
 dependencies = [
- "nu-utils",
+ "nu-utils 0.88.2",
  "unicode-width",
 ]
 
@@ -3152,12 +3257,27 @@ name = "nu-test-support"
 version = "0.88.2"
 dependencies = [
  "hamcrest2",
- "nu-glob",
- "nu-path",
- "nu-utils",
+ "nu-glob 0.88.2",
+ "nu-path 0.88.2",
+ "nu-utils 0.88.2",
  "num-format",
  "tempfile",
  "which 4.4.2",
+]
+
+[[package]]
+name = "nu-utils"
+version = "0.88.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "339eed81dd7f6c59bcd14f9d9076f223c0aa0632b42e1efa60de1376f4fa04bd"
+dependencies = [
+ "crossterm_winapi",
+ "log",
+ "lscolors 0.15.0",
+ "num-format",
+ "strip-ansi-escapes",
+ "sys-locale",
+ "unicase",
 ]
 
 [[package]]
@@ -3166,7 +3286,7 @@ version = "0.88.2"
 dependencies = [
  "crossterm_winapi",
  "log",
- "lscolors",
+ "lscolors 0.16.0",
  "num-format",
  "strip-ansi-escapes",
  "sys-locale",
@@ -3177,8 +3297,8 @@ dependencies = [
 name = "nu_plugin_custom_values"
 version = "0.1.0"
 dependencies = [
- "nu-plugin",
- "nu-protocol",
+ "nu-plugin 0.88.2",
+ "nu-protocol 0.88.2",
  "serde",
  "typetag",
 ]
@@ -3187,8 +3307,8 @@ dependencies = [
 name = "nu_plugin_example"
 version = "0.88.2"
 dependencies = [
- "nu-plugin",
- "nu-protocol",
+ "nu-plugin 0.88.2",
+ "nu-protocol 0.88.2",
 ]
 
 [[package]]
@@ -3198,8 +3318,8 @@ dependencies = [
  "eml-parser",
  "ical 0.8.0",
  "indexmap",
- "nu-plugin",
- "nu-protocol",
+ "nu-plugin 0.88.2",
+ "nu-protocol 0.88.2",
  "rust-ini",
 ]
 
@@ -3210,8 +3330,20 @@ dependencies = [
  "eml-parser",
  "ical 0.9.0",
  "indexmap",
- "nu-plugin",
- "nu-protocol",
+ "nu-plugin 0.88.2",
+ "nu-protocol 0.88.2",
+ "rust-ini",
+]
+
+[[package]]
+name = "nu_plugin_formats_v1"
+version = "0.88.1"
+dependencies = [
+ "eml-parser",
+ "ical 0.9.0",
+ "indexmap",
+ "nu-plugin 0.88.1",
+ "nu-protocol 0.88.1",
  "rust-ini",
 ]
 
@@ -3220,16 +3352,16 @@ name = "nu_plugin_gstat"
 version = "0.88.2"
 dependencies = [
  "git2",
- "nu-plugin",
- "nu-protocol",
+ "nu-plugin 0.88.2",
+ "nu-protocol 0.88.2",
 ]
 
 [[package]]
 name = "nu_plugin_inc"
 version = "0.88.2"
 dependencies = [
- "nu-plugin",
- "nu-protocol",
+ "nu-plugin 0.88.2",
+ "nu-protocol 0.88.2",
  "semver",
 ]
 
@@ -3238,9 +3370,9 @@ name = "nu_plugin_query"
 version = "0.88.2"
 dependencies = [
  "gjson",
- "nu-engine",
- "nu-plugin",
- "nu-protocol",
+ "nu-engine 0.88.2",
+ "nu-plugin 0.88.2",
+ "nu-protocol 0.88.2",
  "scraper",
  "sxd-document",
  "sxd-xpath",
@@ -4937,7 +5069,21 @@ dependencies = [
  "lazy_static",
  "log",
  "parking_lot",
- "serial_test_derive",
+ "serial_test_derive 2.0.0",
+]
+
+[[package]]
+name = "serial_test"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "953ad9342b3aaca7cb43c45c097dd008d4907070394bd0751a0aa8817e5a018d"
+dependencies = [
+ "dashmap",
+ "futures",
+ "lazy_static",
+ "log",
+ "parking_lot",
+ "serial_test_derive 3.0.0",
 ]
 
 [[package]]
@@ -4945,6 +5091,17 @@ name = "serial_test_derive"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91d129178576168c589c9ec973feedf7d3126c01ac2bf08795109aa35b69fb8f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.40",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b93fb4adc70021ac1b47f7d45e8cc4169baaa7ea58483bc5b721d19a26202212"
 dependencies = [
  "proc-macro2",
  "quote",
