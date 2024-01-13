@@ -66,6 +66,11 @@ impl PipeFd<PipeRead> {
         OwningPipeReader::new(self)
     }
 
+    /// Creates a new `PipeReader` from the given pipe file descriptor.
+    pub fn reader(&self) -> PipeReader<'_> {
+        PipeReader::new(self)
+    }
+
     /// The pipe fd of stdin.
     pub fn stdin() -> PipeFd<PipeRead> {
         unsafe { PipeFd::from_raw_pipe_fd(0) }
@@ -76,6 +81,11 @@ impl PipeFd<PipeWrite> {
     /// Creates a new `OwningPipeWriter` from the given pipe file descriptor.
     pub fn into_writer(self) -> OwningPipeWriter {
         OwningPipeWriter::new(self)
+    }
+
+    /// Creates a new `PipeWriter` from the given pipe file descriptor.
+    pub fn writer(&self) -> PipeWriter<'_> {
+        PipeWriter::new(self)
     }
 
     /// The pipe fd of stdout.
@@ -325,8 +335,10 @@ mod tests {
     };
 
     use std::{
-        io::{Read, Write},
+        io::{ErrorKind, Read, Write},
         process::{Command, Stdio},
+        thread::{self, JoinHandle},
+        time::Duration,
     };
 
     #[test]
@@ -376,8 +388,8 @@ mod tests {
     >(
         name: S,
         f: F,
-    ) -> Result<std::thread::JoinHandle<T>, std::io::Error> {
-        std::thread::Builder::new().name(name.into()).spawn(f)
+    ) -> Result<JoinHandle<T>, std::io::Error> {
+        thread::Builder::new().name(name.into()).spawn(f)
     }
 
     // This test among others are ran in serial to ensure that the pipe file descriptors
@@ -490,7 +502,7 @@ mod tests {
     fn pipe_in_another_thread_cancelled() {
         let (read, write) = pipe().unwrap();
 
-        let thread: std::thread::JoinHandle<Result<(), std::io::Error>> =
+        let thread: JoinHandle<Result<(), std::io::Error>> =
             named_thread("thread@pipe_in_another_thread_cancelled", move || {
                 let mut writer = write.into_writer();
 
@@ -498,7 +510,7 @@ mod tests {
                 loop {
                     eprintln!("Writing to pipe...");
                     _ = writer.write("hello world".as_bytes())?;
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    thread::sleep(Duration::from_millis(50));
                     writer.flush()?;
                 }
             })
@@ -520,7 +532,7 @@ mod tests {
         match joined {
             Ok(_) => panic!("Thread should have been cancelled"),
             Err(e) => match e.kind() {
-                std::io::ErrorKind::BrokenPipe => {}
+                ErrorKind::BrokenPipe => {}
                 _ => panic!("Unexpected error: {:?}", e),
             },
         }

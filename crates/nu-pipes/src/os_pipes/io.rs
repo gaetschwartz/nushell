@@ -53,8 +53,10 @@ impl<'a> PipeWriter<'a> {
     /// let writer = PipeWriter::new(&pipe_fd);
     /// ```
     pub fn new<'b: 'a>(fd: &'b PipeFd<PipeWrite>) -> Self {
-        let writer = BufWriter::with_capacity(PIPE_BUFFER_CAPACITY, RawPipeWriter(fd));
-        Self { fd, writer }
+        Self {
+            fd,
+            writer: BufWriter::with_capacity(PIPE_BUFFER_CAPACITY, RawPipeWriter(fd)),
+        }
     }
 }
 
