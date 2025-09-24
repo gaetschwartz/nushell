@@ -61,16 +61,18 @@ encoding_rs = { workspace = true }
 fancy-regex = { workspace = true }
 filesize = { workspace = true }
 filetime = { workspace = true }
-http = {workspace = true}
+http = { workspace = true }
 human-date-parser = { workspace = true }
 indexmap = { workspace = true }
 indicatif = { workspace = true }
 itertools = { workspace = true }
+kdl = { workspace = true }
 log = { workspace = true }
 lscolors = { workspace = true, default-features = false, features = [
 	"nu-ansi-term",
 ] }
 md5 = { workspace = true }
+miette = { workspace = true }
 mime = { workspace = true }
 mime_guess = { workspace = true }
 multipart-rs = { workspace = true, optional = true }
@@ -212,14 +214,10 @@ network = [
 	"multipart-rs",
 	"uuid",
 	"ureq",
-	"update-informer"
+	"update-informer",
 ]
 
-native-tls = [
-	"dep:native-tls",
-	"update-informer/native-tls",
-	"ureq/native-tls",
-]
+native-tls = ["dep:native-tls", "update-informer/native-tls", "ureq/native-tls"]
 rustls-tls = [
 	"dep:rustls",
 	"dep:rustls-native-certs",
