@@ -101,6 +101,7 @@ indicatif = "0.17"
 interprocess = "2.2.0"
 is_executable = "1.0"
 itertools = "0.14"
+kdl = "6.1"
 lean_string = { version = "0.5", features = ["serde"] }
 libc = "0.2"
 libproc = "0.14"
